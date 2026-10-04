@@ -1,0 +1,6 @@
+.tools/
+.arduino-data/
+.arduino-downloads/
+sketchbook/
+build/
+arduino-cli.yaml
