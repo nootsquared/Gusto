@@ -77,13 +77,14 @@ struct RootView: View {
                     )
                     .renderingMode(.original)
                 }
-            }.tag(AppTab.messages)
+            }.badge(store.unreadMessageCount).tag(AppTab.messages)
             NavigationStack { ProfileView() }.tabItem {
                 Label {
                     Text("You")
                 } icon: {
                     Image(
-                        uiImage: NavigationArtwork.accountIcon(accountPhoto, name: store.profileName, selected: router.tab == .you)
+                        uiImage: NavigationArtwork.accountIcon(
+                            accountPhoto, name: store.profileName, selected: router.tab == .you)
                     )
                     .renderingMode(.original)
                 }
@@ -94,7 +95,9 @@ struct RootView: View {
             if let avatar = store.profileAvatar, !avatar.isEmpty {
                 let image = try? await ImagePipeline.shared.image(avatar)
                 if !Task.isCancelled { accountPhoto = image }
-            } else if !store.isBackend { accountPhoto = UIImage(named: "profile") }
+            } else if !store.isBackend {
+                accountPhoto = UIImage(named: "profile")
+            }
         }.task {
             let args = ProcessInfo.processInfo.arguments
             #if DEBUG
@@ -127,7 +130,10 @@ struct RootView: View {
                     store.notice = error.localizedDescription
                 }
             }
-        }.task(id: "\(SessionController.shared.current?.userId ?? "")-\(SessionController.shared.profileRevision)") {
+        }.task(
+            id:
+                "\(SessionController.shared.current?.userId ?? "")-\(SessionController.shared.profileRevision)"
+        ) {
             guard store.isBackend, !SessionController.shared.isLocalBackend else { return }
             guard SessionController.shared.current != nil else {
                 store.disconnectBackend()
@@ -167,112 +173,114 @@ struct RootView: View {
             scanner.reset()
             scanner.bindStorageHistory(store)
         }
-            .task(id: "\(scenePhase)-\(store.isBackend)-\(store.accountID)") {
-                if scenePhase == .active { await store.pollBackend() }
-            }.tint(Theme.ink).background(Theme.ivory.ignoresSafeArea())
-            .toolbarBackground(Theme.paper, for: .tabBar).toolbarBackground(.visible, for: .tabBar)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if store.runActive {
+        .task(id: "\(scenePhase)-\(store.isBackend)-\(store.accountID)") {
+            if scenePhase == .active { await store.pollBackend() }
+        }.tint(Theme.ink).background(Theme.ivory.ignoresSafeArea())
+        .toolbarBackground(Theme.paper, for: .tabBar).toolbarBackground(.visible, for: .tabBar)
+        .animation(Theme.spring, value: store.incomingNotification?.id)
+        .overlay(alignment: .top) {
+            if SessionController.shared.needsSignIn {
+                HStack {
+                    Text("Reconnect your account").rescueFont(14, .semibold)
+                    Spacer()
+                    Button("Sign in again") { Task { await SessionController.shared.signIn() } }
+                        .rescueFont(14, .semibold).foregroundStyle(Theme.save)
+                }.padding(16).card(radius: 20).padding(.horizontal, 16)
+            } else if router.sheet == nil, store.incomingNotification != nil {
+                IncomingMessageBanner()
+            } else if let notice = store.notice {
+                HStack(spacing: 10) {
+                    Image(
+                        systemName: notice == "Added to cart"
+                            ? "checkmark.circle.fill" : "info.circle"
+                    )
+                    .foregroundStyle(Theme.save)
+                    Text(notice).rescueFont(14, .medium)
+                    Spacer(minLength: 8)
                     Button {
-                        router.sheet = .run
+                        withAnimation(Theme.spring) { store.notice = nil }
                     } label: {
-                        LivePickupCard()
-                    }.buttonStyle(.plain).accessibilityIdentifier("active-run").padding(
-                        .horizontal, 12
-                    ).padding(.vertical, 6).background(Theme.ivory)
-                }
-            }
-            .overlay(alignment: .top) {
-                if SessionController.shared.needsSignIn {
-                    HStack {
-                        Text("Reconnect your account").rescueFont(14, .semibold)
-                        Spacer()
-                        Button("Sign in again") { Task { await SessionController.shared.signIn() } }
-                            .rescueFont(14, .semibold).foregroundStyle(Theme.save)
-                    }.padding(16).card(radius: 20).padding(.horizontal, 16)
-                } else if let notice = store.notice {
-                    HStack(spacing: 10) {
-                        Image(systemName: notice == "Added to cart" ? "checkmark.circle.fill" : "info.circle")
-                            .foregroundStyle(Theme.save)
-                        Text(notice).rescueFont(14, .medium)
-                        Spacer(minLength: 8)
-                        Button { withAnimation(Theme.spring) { store.notice = nil } } label: {
-                            Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
-                                .frame(width: 32, height: 32)
-                        }.buttonStyle(.plain).accessibilityLabel("Dismiss notification")
-                    }.foregroundStyle(Theme.ink).padding(12)
-                        .background(Theme.paper, in: RoundedRectangle(cornerRadius: 20))
-                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Theme.line, lineWidth: 1))
-                        .shadow(color: Theme.deep.opacity(0.1), radius: 16, y: 6)
-                        .padding(.horizontal, 16)
-                        .gesture(DragGesture(minimumDistance: 15).onEnded { value in
+                        Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
+                            .frame(width: 32, height: 32)
+                    }.buttonStyle(.plain).accessibilityLabel("Dismiss notification")
+                }.foregroundStyle(Theme.ink).padding(12)
+                    .background(Theme.paper, in: RoundedRectangle(cornerRadius: 20))
+                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(Theme.line, lineWidth: 1))
+                    .shadow(color: Theme.deep.opacity(0.1), radius: 16, y: 6)
+                    .padding(.horizontal, 16)
+                    .gesture(
+                        DragGesture(minimumDistance: 15).onEnded { value in
                             if abs(value.translation.width) > 35 || value.translation.height < -20 {
                                 withAnimation(Theme.spring) { store.notice = nil }
                             }
-                        }).transition(
-                            .move(edge: .top).combined(with: .opacity)
-                        )
-                        .task(id: notice) {
-                            try? await Task.sleep(nanoseconds: 2_600_000_000)
-                            if !Task.isCancelled && store.notice == notice {
-                                withAnimation(Theme.spring) { store.notice = nil }
-                            }
                         }
-                }
-            }
-            .animation(reduceMotion ? nil : Theme.spring, value: store.notice)
-            .sheet(
-                isPresented: Binding(
-                    get: { router.sheet != nil }, set: { if !$0 { router.sheet = nil } })
-            ) {
-                SheetHost().environment(store).environment(router).sheetStyle().presentationDetents(
-                    sheetDetents)
-            }
-            .fullScreenCover(isPresented: $showOnboarding) {
-                OnboardingView {
-                    hasOnboarded = true
-                    showOnboarding = false
-                }
-            }
-            .fullScreenCover(isPresented: $showFinale) {
-                FinaleView {
-                    store.finishRun()
-                    router.tab = .you
-                    showFinale = false
-                }
-            }
-            .onAppear {
-                showOnboarding =
-                    !hasOnboarded && !ProcessInfo.processInfo.arguments.contains("--uitesting")
-            }
-            .onChange(of: store.online) { _, online in
-                if online && !ProcessInfo.processInfo.arguments.contains("--uitesting") {
-                    location.requestInitially()
-                }
-            }
-            .onChange(of: location.selection, initial: true) { _, selection in
-                if let selection, !ProcessInfo.processInfo.arguments.contains("--uitesting") {
-                    store.updateBrowseLocation(
-                        latitude: selection.latitude, longitude: selection.longitude)
-                }
-            }
-            .onChange(of: scenePhase, initial: true) { _, phase in
-                guard !ProcessInfo.processInfo.arguments.contains("--uitesting") else { return }
-                if phase == .active { location.resume() } else { location.pause() }
-            }
-            .onChange(of: store.phase) { previous, phase in
-                if store.isBackend && previous == .idle && phase == .enroute {
-                    router.tab = .map
-                    router.sheet = nil
-                }
-                if phase == .finished {
-                    router.sheet = nil
-                    Task {
-                        try? await Task.sleep(nanoseconds: 350_000_000)
-                        showFinale = true
+                    ).transition(
+                        .move(edge: .top).combined(with: .opacity)
+                    )
+                    .task(id: notice) {
+                        try? await Task.sleep(nanoseconds: 2_600_000_000)
+                        if !Task.isCancelled && store.notice == notice {
+                            withAnimation(Theme.spring) { store.notice = nil }
+                        }
                     }
+            }
+        }
+        .animation(reduceMotion ? nil : Theme.spring, value: store.notice)
+        .sheet(
+            isPresented: Binding(
+                get: { router.sheet != nil }, set: { if !$0 { router.sheet = nil } })
+        ) {
+            SheetHost().environment(store).environment(router)
+                .overlay(alignment: .top) {
+                    if store.incomingNotification != nil { IncomingMessageBanner() }
+                }.sheetStyle().presentationDetents(
+                    sheetDetents)
+        }
+        .fullScreenCover(isPresented: $showOnboarding) {
+            OnboardingView {
+                hasOnboarded = true
+                showOnboarding = false
+            }
+        }
+        .fullScreenCover(isPresented: $showFinale) {
+            FinaleView {
+                store.finishRun()
+                router.tab = .you
+                showFinale = false
+            }
+        }
+        .onAppear {
+            showOnboarding =
+                !hasOnboarded && !ProcessInfo.processInfo.arguments.contains("--uitesting")
+        }
+        .onChange(of: store.online) { _, online in
+            if online && !ProcessInfo.processInfo.arguments.contains("--uitesting") {
+                location.requestInitially()
+            }
+        }
+        .onChange(of: location.selection, initial: true) { _, selection in
+            if let selection, !ProcessInfo.processInfo.arguments.contains("--uitesting") {
+                store.updateBrowseLocation(
+                    latitude: selection.latitude, longitude: selection.longitude)
+            }
+        }
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            guard !ProcessInfo.processInfo.arguments.contains("--uitesting") else { return }
+            if phase == .active { location.resume() } else { location.pause() }
+        }
+        .onChange(of: store.phase) { previous, phase in
+            if store.isBackend && previous == .idle && phase == .enroute {
+                router.tab = .map
+                router.sheet = nil
+            }
+            if phase == .finished {
+                router.sheet = nil
+                Task {
+                    try? await Task.sleep(nanoseconds: 350_000_000)
+                    showFinale = true
                 }
             }
+        }
     }
     private var sheetDetents: Set<PresentationDetent> {
         switch router.sheet {

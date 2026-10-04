@@ -75,7 +75,7 @@ import Vision
                 let analysis = try await store.analyzeFoodPhoto(draft.photoBase64)
                 guard current == generation else { return }
                 draft.name = analysis.name
-                draft.variety = analysis.variety
+                draft.variety = InventoryFood.cleanVariety(analysis.variety, foodName: analysis.name)
                 draft.category = analysis.category
                 draft.condition = analysis.condition
                 draft.quantity = analysis.quantity

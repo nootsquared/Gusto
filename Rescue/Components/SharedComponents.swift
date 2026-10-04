@@ -32,8 +32,11 @@ struct FoodPhoto: View {
         GeometryReader { geometry in
             if name.hasPrefix("data:image/jpeg;base64,"),
                 let data = Data(base64Encoded: String(name.dropFirst(23))),
-                let image = UIImage(data: data) {
-                Image(uiImage: image).resizable().scaledToFill().frame(width: geometry.size.width, height: geometry.size.height).clipped()
+                let image = UIImage(data: data)
+            {
+                Image(uiImage: image).resizable().scaledToFill().frame(
+                    width: geometry.size.width, height: geometry.size.height
+                ).clipped()
             } else if name.hasPrefix("/") || name.hasPrefix("http") {
                 Group {
                     if let remoteImage {
@@ -96,7 +99,7 @@ struct Avatar: View {
 struct FreshnessBadge: View {
     let freshness: Freshness
     var solid = false
-    var showDot = true
+    var showDot = false
     private var background: Color {
         solid
             ? Theme.paper.opacity(0.95)
@@ -214,9 +217,11 @@ struct AddButton: View {
                 .background(inCart ? Theme.sage : Theme.paper, in: Circle())
                 .shadow(color: Theme.ink.opacity(0.07), radius: 3, y: 2)
                 .frame(width: 44, height: 44).contentShape(Rectangle())
-        }.buttonStyle(.plain).disabled(inCart || store.runActive || store.backendBusy || !item.available)
-            .accessibilityLabel(inCart ? "In cart: \(item.name)" : "Add \(item.name)")
-            .accessibilityIdentifier("add-\(item.id)")
+        }.buttonStyle(.plain).disabled(
+            inCart || store.runActive || store.backendBusy || !item.available
+        )
+        .accessibilityLabel(inCart ? "In cart: \(item.name)" : "Add \(item.name)")
+        .accessibilityIdentifier("add-\(item.id)")
     }
 }
 
@@ -257,7 +262,9 @@ struct ListingOffer: View {
         }.monospacedDigit()
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Price \(Money.text(item.price)), retail \(Money.text(item.retail)), \(item.discount) percent below retail, \(String(format: "%.1f", item.distance)) miles away")
+            .accessibilityLabel(
+                "Price \(Money.text(item.price)), retail \(Money.text(item.retail)), \(item.discount) percent below retail, \(String(format: "%.1f", item.distance)) miles away"
+            )
     }
 }
 
@@ -355,5 +362,50 @@ struct EmptyState: View {
             Text(message)
         }
         .foregroundStyle(Theme.secondary)
+    }
+}
+
+struct IncomingMessageBanner: View {
+    @Environment(AppStore.self) private var store
+    @Environment(AppRouter.self) private var router
+    var body: some View {
+        if let incoming = store.incomingNotification {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "bubble.left.fill").foregroundStyle(Theme.save)
+                    .frame(width: 40, height: 40).background(Theme.soft, in: Circle())
+                Button {
+                    router.chat(incoming.senderID)
+                    store.dismissIncomingNotification()
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(incoming.title).rescueFont(15, .semibold)
+                        Text(incoming.body).rescueFont(13).foregroundStyle(Theme.secondary)
+                            .lineLimit(2)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }.buttonStyle(.plain)
+                Button {
+                    store.dismissIncomingNotification()
+                } label: {
+                    Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)).padding(8)
+                }.buttonStyle(.plain).accessibilityLabel("Dismiss message notification")
+            }.foregroundStyle(Theme.ink).padding(14).card(radius: 22)
+                .shadow(color: Theme.deep.opacity(0.12), radius: 18, y: 8)
+                .padding(.horizontal, 16).padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .gesture(
+                    DragGesture(minimumDistance: 15).onEnded { value in
+                        if value.translation.height < -20 || abs(value.translation.width) > 35 {
+                            store.dismissIncomingNotification()
+                        }
+                    }
+                )
+                .task(id: incoming.id) {
+                    Haptic.success()
+                    try? await Task.sleep(for: .seconds(6))
+                    if !Task.isCancelled && store.incomingNotification?.id == incoming.id {
+                        store.dismissIncomingNotification()
+                    }
+                }
+        }
     }
 }

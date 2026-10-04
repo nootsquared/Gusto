@@ -87,8 +87,8 @@ cleared on offline refresh, which is stricter than retaining them for 15 minutes
 are account-scoped app files. Product writes require a successful server response; UI bodies perform
 no requests. Cached listings are display snapshots, never proof of an inventory hold.
 
-Bootstrap/cart/profile refresh at 30 seconds; feed at 60 seconds; chat polls every five seconds;
-pickup/payment polls every three seconds. Root scene lifecycle cancels polling in the background.
+Bootstrap/cart/profile/inbox and active chat refresh every three seconds; the complete marketplace
+feed refreshes about every ten seconds. Root scene lifecycle cancels polling in the background.
 Errors back off at 2/4/8/16/32/60 seconds with jitter. Search debounces 300 ms and rejects stale
 responses. Feed, search, purchases and sales expose explicit Load more controls; automatic scroll
 prefetch is not enabled.
@@ -161,7 +161,7 @@ Gusto consumer copy refers to pickup plans, pickup trips, and purchases. The exi
 
 ## Scan ownership and hardware boundary
 
-`FoodScanController` owns transient image review. Authenticated builds send a bounded JPEG through `AppStore.analyzeFoodPhoto` to the server's Gemini procedure; fixture builds retain on-device Vision. The server keeps its key in an owner-configured private table, validates structured food metadata, and limits analysis requests. Analysis does not save or publish anything. A confident bounding box offers a rectangular crop with a full-photo restore option. Camera and scan sheets use the root modal host. `AppStore.inventory` and `storageReadings` own product state, clear on account changes, and load through the authenticated repository. Private photos remain private until the atomic `inventory_publish` action creates the listing, pickup location/window, public media reference and seller attestations. `inventory_unlist` archives the linked listing and returns the item to the private collection; claimed/sold listings cannot be removed. Inventory reads and edits are scoped to `ctx.sender`'s registered account.
+`FoodScanController` owns transient image review. Authenticated builds send a bounded JPEG through `AppStore.analyzeFoodPhoto` to the server's Gemini procedure; fixture builds retain on-device Vision. The server keeps its key in an owner-configured private table, validates structured food metadata, and limits analysis requests. Analysis does not save or publish anything. A confident bounding box offers a rectangular crop with a full-photo restore option. Camera and scan sheets use the root modal host. `AppStore.inventory` and `storageReadings` own product state, clear on account changes, and load through the authenticated repository. Private photos remain private until the atomic `inventory_publish` action creates the listing, pickup location/window, public media reference. `inventory_unlist` archives the linked listing and returns the item to the private collection; claimed/sold listings cannot be removed. Inventory reads and edits are scoped to `ctx.sender`'s registered account.
 
 `StorageSensorConnection` is a main-actor CoreBluetooth central/peripheral delegate. It discovers only the Nano climate service, reads and subscribes to its specific characteristic, guards callbacks against disconnected/replaced peripherals, and cancels discovery/connection/staleness tasks during reset. `ClimatePacket` in RescueCore validates the exact 17-byte version-1 binary record and decodes signed little-endian tenths °F, tenths relative humidity and raw clear-channel light counts using each validity bit. `ClimateStream` suppresses repeated read/notify samples by sequence plus uptime and marks measurements stale at five seconds; disconnect resets sequence history so wraparound/reboots work. `SensorLiveDashboard` hides invalid/stale values and updates once per second. Live values stay on the phone. For explicitly linked items, the controller records at most one valid sample per minute through AppStore, converts temperature to Celsius, and preserves light as raw counts. Failed uploads are not replayed with a new timestamp. Bluetooth background mode permits supported OS delivery; force-quit or a disconnected sensor does not continue recording. `StorageSummary` rejects other items/devices, future timestamps, invalid units/ranges, samples before the scan and history older than three days. Light averages never mix raw counts and lux. FoodQualityEstimate combines matching Gemini metadata with recent recorded averages and elapsed time, using an explicitly provisional Q10=2 temperature rule and a small low-humidity penalty. Colder readings do not extend the suggested life. Missing history or changed food/storage metadata suppresses the estimate. This is a remaining-quality estimate, not a food-safety expiry date. No connected sensor means no active recording; recent recorded samples may still support a labeled historical estimate.
 
@@ -206,3 +206,35 @@ Discovery consolidates repeated bundled-photo seed products while preserving gen
 Session refresh errors retain the current account and screen; explicit reconnect is required when
 credentials expire. SpacetimeAuth photo claims or authenticated userinfo populate only the signed-in
 user’s avatar. No identity/student verification flow was added.
+
+Incoming activity uses server conversation sequence numbers, authenticated membership read cursors,
+and latest-message timestamps in bootstrap. AppStore establishes a per-account baseline, deduplicates
+new activity, queues transient banners, and clears read counts only after mark_read succeeds.
+MessagesView uses bootstrap summaries rather than depending on opening each conversation.
+Cart previews group actual catalog items by their seller, independent of the fixture-only planner.
+Pickup projections and route calculations use the stored exact coordinates; reverse geocoding only
+supplies a written address and never replaces a GPS fix with a nearby building's coordinate.
+Successful inventory remove/unlist writes update local collection and catalog immediately. An inventory
+revision prevents an earlier sensor/inventory fetch from undoing that change; server reservation guards
+remain authoritative and errors are shown in the item panel. Optional seller-entered original price and
+weight carry through listing, cart and pickup totals; absent values remain zero contribution.
+
+The selling form and listing details do not contain a safety checkbox grid. Publication validates item, photo, price, location and pickup dates, without creating unchecked or fabricated attestation records. Existing historical rows remain for compatibility.
+
+DiscoverView uses the results gallery whenever a query or non-default Filters is active. Empty-query category/budget/distance filters call the paginated backend search too; gallery results come from that query snapshot, not the recommendation rails. Default filters restore the explore view.
+
+Seller confirmation excludes booked reservations from bootstrap cart/cartListings while preserving
+claims and pickup-stop items until completion or cancellation. Confirmation and buyer arrival
+create deduplicated conversation messages. The buyer demo_payment action requires the active stop,
+arrival, seller handoff and buyer verification before atomically creating a simulated receipt and
+marking the listing sold. Repeated requests return the existing payment; no external payment runs.
+The privileged completePayment adapter remains service-only. Confirmed plans cannot be overwritten
+by another cart plan. Navigation targets the remaining stops, starting with the current pickup.
+
+The pickup-trip entry is an inline card below Discover search, scrolling with the feed. It does
+not add a root bottom inset or cover other tabs. Cart and seller chat also retain trip access.
+
+Pending pickup plans expose Cancel pickup requests. The owner-only cancellation transaction
+releases all plan reservations, removes its cart entries, marks the run cancelled and posts one
+cancellation message per requested seller. Repeated cancellation is harmless. Active trips use
+the existing trip cancellation flow. The Discover trip card disappears after successful sync.

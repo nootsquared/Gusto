@@ -13,6 +13,37 @@ struct MessagesView: View {
                 }.padding(.top, 16)
 
                 VStack(spacing: 0) {
+                    ForEach(store.messageSellers) { seller in
+                        Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 84)
+                        Button {
+                            router.chat(seller.id)
+                        } label: {
+                            HStack(spacing: 14) {
+                                Avatar(seller: seller, size: 52)
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(seller.name).rescueFont(16, .semibold)
+                                    if let item = store.pinnedListing(for: seller.id) {
+                                        Text(item.name).rescueFont(12).foregroundStyle(Theme.save)
+                                            .lineLimit(1)
+                                    }
+                                    Text(
+                                        store.messagePreview(for: seller.id)
+                                    )
+                                    .rescueFont(14).foregroundStyle(Theme.secondary).lineLimit(2)
+                                }.frame(maxWidth: .infinity, alignment: .leading)
+                                if let unread = store.conversation(with: seller.id)?.unreadCount,
+                                    unread > 0
+                                {
+                                    Text("\(unread)").rescueFont(12, .semibold)
+                                        .foregroundStyle(Theme.paper).padding(7)
+                                        .background(Theme.save, in: Capsule())
+                                }
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(
+                                        Theme.muted)
+                            }.padding(18).foregroundStyle(Theme.ink)
+                        }.buttonStyle(.plain).accessibilityIdentifier("chat-\(seller.id)")
+                    }
                     NavigationLink {
                         GustoWelcomeMessage()
                     } label: {
@@ -39,31 +70,6 @@ struct MessagesView: View {
                         }.padding(18).foregroundStyle(Theme.ink)
                     }.buttonStyle(.plain).accessibilityIdentifier("gusto-welcome")
 
-                    ForEach(store.messageSellers) { seller in
-                        Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 84)
-                        Button {
-                            router.chat(seller.id)
-                        } label: {
-                            HStack(spacing: 14) {
-                                Avatar(seller: seller, size: 52)
-                                VStack(alignment: .leading, spacing: 5) {
-                                    Text(seller.name).rescueFont(16, .semibold)
-                                    if let item = store.pinnedListing(for: seller.id) {
-                                        Text(item.name).rescueFont(12).foregroundStyle(Theme.save)
-                                            .lineLimit(1)
-                                    }
-                                    Text(
-                                        store.messages[seller.id]?.last?.text
-                                            ?? "Start a conversation"
-                                    )
-                                    .rescueFont(14).foregroundStyle(Theme.secondary).lineLimit(2)
-                                }.frame(maxWidth: .infinity, alignment: .leading)
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(
-                                        Theme.muted)
-                            }.padding(18).foregroundStyle(Theme.ink)
-                        }.buttonStyle(.plain).accessibilityIdentifier("chat-\(seller.id)")
-                    }
                 }.card(radius: 24)
 
                 if store.messageSellers.isEmpty {
@@ -188,6 +194,21 @@ struct ChatView: View {
                 }.padding(10).card(radius: 16).padding(.horizontal, 20).padding(.bottom, 8)
                     .accessibilityIdentifier("pinned-product")
             }
+            if let plan = store.plan, plan.stops.contains(where: { $0.seller.id == sellerID }),
+                store.phase != .finished
+            {
+                Button {
+                    router.sheet = .run
+                } label: {
+                    HStack {
+                        Image(systemName: "map")
+                        Text("View pickup trip").rescueFont(15, .semibold)
+                        Spacer()
+                        Image(systemName: "arrow.right")
+                    }.foregroundStyle(Theme.save).padding(16).card(radius: 20)
+                }.padding(.horizontal, 20).padding(.bottom, 8)
+                    .accessibilityIdentifier("view-pickup-trip")
+            }
             ForEach(store.pickupRequests.filter { $0.buyerId == sellerID }) { request in
                 VStack(alignment: .leading, spacing: 10) {
                     Text(request.status == "waiting" ? "Pickup request" : "Pickup confirmed")
@@ -196,15 +217,24 @@ struct ChatView: View {
                     Text(Date(timeIntervalSince1970: request.proposed / 1000), style: .time)
                         .rescueFont(14, .semibold).foregroundStyle(Theme.save)
                     if request.status == "waiting" {
-                        Button("Confirm pickup") { Task { await store.confirmSellerPickup(request.id) } }
-                            .buttonStyle(.borderedProminent).tint(Theme.save).disabled(store.backendBusy)
-                            .accessibilityIdentifier("confirm-pickup-\(request.id)")
+                        Button("Confirm pickup") {
+                            Task { await store.confirmSellerPickup(request.id) }
+                        }
+                        .buttonStyle(.borderedProminent).tint(Theme.save).disabled(
+                            store.backendBusy
+                        )
+                        .accessibilityIdentifier("confirm-pickup-\(request.id)")
                     } else if request.phase == "waiting" {
-                        Button("Confirm handoff") { Task { await store.completeSellerHandoff(request.id) } }
-                            .buttonStyle(.borderedProminent).tint(Theme.save).disabled(store.backendBusy)
-                            .accessibilityIdentifier("confirm-handoff-\(request.id)")
+                        Button("Confirm handoff") {
+                            Task { await store.completeSellerHandoff(request.id) }
+                        }
+                        .buttonStyle(.borderedProminent).tint(Theme.save).disabled(
+                            store.backendBusy
+                        )
+                        .accessibilityIdentifier("confirm-handoff-\(request.id)")
                     } else {
-                        Text("The buyer will let you know when they arrive.").rescueFont(12).foregroundStyle(Theme.secondary)
+                        Text("The buyer will let you know when they arrive.").rescueFont(12)
+                            .foregroundStyle(Theme.secondary)
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(16).card(radius: 20)
                     .padding(.horizontal, 20).padding(.bottom, 8)

@@ -2,7 +2,7 @@ import { t, type InferSchema, type TransactionCtx, SenderError, Range } from 'sp
 import db, {scheduledTasks} from './schema';
 import { Identity, ScheduleAt, TimeDuration } from 'spacetimedb';
 import { registeredClaims } from './auth';
-import { foodPrompt, foodSchema, validateFood } from './gemini';
+import { foodPrompt, foodSchema, validateFood, cleanVariety } from './gemini';
 export default db;
 export const init = db.init(ctx => { ctx.db.databaseOwner.insert({ id:'owner', identity:ctx.sender }); });
 type Ctx = TransactionCtx<InferSchema<typeof db>>;
@@ -123,7 +123,7 @@ function runProjection(ctx: Ctx, user: string) {
   const run = [...ctx.db.pickupRuns.buyerId.filter(user)].filter(r => ['draft', 'active', 'finished'].includes(r.status)).sort((a,b) => Number(b.created - a.created))[0];
   if (!run) return null;
   return { ...run, stops: [...ctx.db.pickupStops.byRun.filter(run.id)].sort((a,b) => a.sequence-b.sequence).map(s => ({ ...s,
-    seller: {...sellerProjection(ctx, s.sellerId), latitude:ctx.db.pickupLocations.id.find(s.locationId)!.latitude, longitude:ctx.db.pickupLocations.id.find(s.locationId)!.longitude, area:ctx.db.pickupLocations.id.find(s.locationId)!.area}, items: [...ctx.db.pickupStopItems.stopId.filter(s.id)].map(i => listingProjection(ctx, listing(ctx, i.listingId))),
+    seller: {...sellerProjection(ctx, s.sellerId), latitude:ctx.db.pickupLocations.id.find(s.locationId)!.exactLatitude, longitude:ctx.db.pickupLocations.id.find(s.locationId)!.exactLongitude, area:ctx.db.pickupLocations.id.find(s.locationId)!.area}, items: [...ctx.db.pickupStopItems.stopId.filter(s.id)].map(i => listingProjection(ctx, listing(ctx, i.listingId))),
     privateLocation: s.status === 'confirmed' && [...ctx.db.pickupStopItems.stopId.filter(s.id)].every(i => !expired(ctx, i.reservationId)) ? { ...privateLocation(ctx, s.locationId), cacheUntil:Math.min(now(ctx)+900000,...[...ctx.db.pickupStopItems.stopId.filter(s.id)].map(i=>Number(ctx.db.reservations.id.find(i.reservationId)!.expires))) } : null,
   })) };
 }
@@ -242,15 +242,22 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
     case 'bootstrap': {
       for (const r of ctx.db.reservations.byBuyer.filter(user)) if (['held','booked'].includes(r.status) && r.expires <= now(ctx)) release(ctx,r.id,'expired');
       const items = [...ctx.db.cartItems.buyerId.filter(user)].filter(i => !i.reservationId || !expired(ctx, i.reservationId));
+      const basket=items.filter(i=>!i.reservationId||ctx.db.reservations.id.find(i.reservationId)?.status!=='booked');
       return { user: ctx.db.users.id.find(user), preferences: ctx.db.userPreferences.userId.find(user),
-        cart: items.map(i => i.listingId), cartListings: items.map(i => listingProjection(ctx,listing(ctx,i.listingId))),
+        cart: basket.map(i => i.listingId), cartListings: basket.map(i => listingProjection(ctx,listing(ctx,i.listingId))),
         reservations: items.filter(i => i.reservationId).map(i => ctx.db.reservations.id.find(i.reservationId)),
         favorites: [...ctx.db.favorites.userId.filter(user)].map(f=>f.listingId),follows:[...ctx.db.follows.userId.filter(user)],
         savedListings: [...ctx.db.favorites.userId.filter(user)].map(f=>ctx.db.listings.id.find(f.listingId)).filter((l): l is ReturnType<typeof listing> => !!l && l.status === 'published' && l.sellerId !== user).map(l=>listingProjection(ctx,l)),
         sellers: [...ctx.db.users.iter()].map(u=>sellerProjection(ctx,u.id)), run: runProjection(ctx,user),
         receipts: receiptsFor(ctx,user).slice(0,30), sales: receiptsFor(ctx,user,true).slice(0,30),
         ownListings: [...ctx.db.listings.bySeller.filter(user)].map(l=>listingProjection(ctx,l)),
-        conversations: [...ctx.db.conversationMembers.userId.filter(user)].map(m=>ctx.db.conversations.id.find(m.conversationId)),
+        conversations: [...ctx.db.conversationMembers.userId.filter(user)].map(m=>{
+          const c=ctx.db.conversations.id.find(m.conversationId)!;
+          const rows=[...ctx.db.messages.byConversation.filter([c.id,new Range<number>()])];
+          const latest=rows.sort((a,b)=>b.sequence-a.sequence)[0];
+          return {...c,lastRead:m.lastRead,unreadCount:rows.filter(r=>r.senderId!==user&&r.sequence>m.lastRead).length,
+            lastSenderId:latest?.senderId??'',lastMessageAt:Number(latest?.created??0)};
+        }).sort((a,b)=>b.lastMessageAt-a.lastMessageAt),
         pickupRequests: ['waiting','confirmed'].flatMap(status=>[...ctx.db.pickupStops.bySeller.filter([user,status])]).filter(s=>{const r=ctx.db.pickupRuns.id.find(s.runId);return r && ['draft','active'].includes(r.status);}).map(s=>{const r=ctx.db.pickupRuns.id.find(s.runId)!;return {id:s.id,buyerId:s.buyerId,buyerName:ctx.db.users.id.find(s.buyerId)?.name??'Buyer',proposed:Number(s.proposed),status:s.status,phase:r.currentStop===s.sequence?r.phase:'scheduled',items:[...ctx.db.pickupStopItems.stopId.filter(s.id)].map(i=>listingProjection(ctx,listing(ctx,i.listingId)))};}),
         monthly: [...ctx.db.impactMonthly.userId.filter(user)], simulation: ctx.db.configuration.id.find('runtime')?.simulation ?? false };
     }
@@ -348,7 +355,10 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
     case 'respond_freshness': {
       const f=ctx.db.freshnessRequests.id.find(q.resourceId);if(!f)fail('not_found');if(f.sellerId!==user)fail('unauthorized');
       ctx.db.freshnessRequests.id.update({...f,status:'responded',responded:stamp(ctx)});
-      const l=listing(ctx,f.listingId);ctx.db.listings.id.update({...l,updated:stamp(ctx)});return {};
+      if(f.status==='responded')return {};
+      const l=listing(ctx,f.listingId);ctx.db.listings.id.update({...l,updated:stamp(ctx)});
+      const c=conversation(ctx,f.requesterId,user,l.id);
+      sendMessage(ctx,user,c.id,`Fresh Check update for ${l.title}: I've reconfirmed its condition.`,`fresh-response-${f.id}`);return {};
     }
     case 'inventory': {
       const items=[...ctx.db.foodInventory.ownerId.filter(user)].sort((a,b)=>Number(b.scannedAt-a.scannedAt));
@@ -367,7 +377,7 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
         !Number.isFinite(f.confidence) || f.confidence<0 || f.confidence>1)fail('invalid_transition');
       if(!old && [...ctx.db.foodInventory.ownerId.filter(user)].length>=50)fail('invalid_transition');
       if(old?.listingID)fail('invalid_transition');
-      const item={id:q.resourceId,ownerId:user,name:f.name.trim(),variety:f.variety.trim(),category:['Produce','Dairy','Bakery','Pantry','Breakfast','Snacks','Prepared'].includes(f.category)?f.category:'Produce',
+      const item={id:q.resourceId,ownerId:user,name:f.name.trim(),variety:cleanVariety(f.variety,f.name),category:['Produce','Dairy','Bakery','Pantry','Breakfast','Snacks','Prepared'].includes(f.category)?f.category:'Produce',
         condition:f.condition,quantity:f.quantity.trim(),storage:f.storage,photoBase64:f.photoBase64,
         identification:['Apple Vision','Gemini'].includes(f.identification)?f.identification:'Manual review',confidence:f.confidence,
         analysis:typeof f.analysis==='string' && f.analysis.trim().length>0 && f.analysis.length<=10000?json(validateFood(JSON.parse(f.analysis))):'',
@@ -401,23 +411,24 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
       const f=ctx.db.foodInventory.id.find(q.resourceId);if(!f)fail('not_found');if(f.ownerId!==user)fail('unauthorized');
       if(f.listingID)fail('invalid_transition');const p=JSON.parse(q.text);
       if(!Number.isInteger(p.price)||p.price<=0||p.price>100000||typeof p.allergens!=='string'||!p.allergens.trim()||p.allergens.length>500 ||
-        p.safeStorage!==true||p.accurateCondition!==true||p.noSpoilage!==true||p.allergensDeclared!==true || !f.photoBase64 ||
+        !f.photoBase64 ||
         typeof p.pickupAddress!=='string'||!p.pickupAddress.trim()||p.pickupAddress.length>500||
         !Number.isFinite(p.latitude)||Math.abs(p.latitude)>90||!Number.isFinite(p.longitude)||Math.abs(p.longitude)>180||
         !Number.isSafeInteger(p.start)||!Number.isSafeInteger(p.end)||p.end<=p.start||p.end<=now(ctx)||p.end>now(ctx)+259200000)fail('invalid_transition');
+      if(p.retail!==undefined&&(!Number.isInteger(p.retail)||p.retail<p.price||p.retail>100000))fail('invalid_transition');
+      if(p.grams!==undefined&&(!Number.isInteger(p.grams)||p.grams<0||p.grams>100000))fail('invalid_transition');
       const a=f.analysis?validateFood(JSON.parse(f.analysis)):null;
       const id=uid(ctx),locId=uid(ctx),mediaId=uid(ctx),area=p.pickupAddress.trim();
       ctx.db.pickupLocations.insert({id:locId,sellerId:user,area:'Pickup location',latitude:p.latitude,
         longitude:p.longitude,exactLatitude:p.latitude,exactLongitude:p.longitude,address:area,instructions:'Arrange pickup in chat'});
       const conditions=recordedStorage(ctx,f);
-      const l=ctx.db.listings.insert({id,sellerId:user,storageConditions:conditions?json(conditions):'',title:f.variety?f.variety+' '+f.name:f.name,description:a?.description??'Identified from a photo and reviewed by the seller.',
-        category:f.category,quantity:f.quantity,price:p.price,retail:p.price,grams:0,freshness:f.condition==='Use soon'?'Use Soon':'Good',
+      const l=ctx.db.listings.insert({id,sellerId:user,storageConditions:conditions?json(conditions):'',title:[cleanVariety(f.variety,f.name),f.name].filter(Boolean).join(' '),description:a?.description??'Identified from a photo and reviewed by the seller.',
+        category:f.category,quantity:f.quantity,price:p.price,retail:p.retail??p.price,grams:p.grams??0,freshness:f.condition==='Use soon'?'Use Soon':'Good',
         opened:a?.opened??false,prepared:a?.prepared??false,storage:f.storage,allergens:p.allergens.trim(),vegetarian:a?.vegetarian??true,purchased:'Seller supplied',bestBy:'',status:'published',area:'Nearby pickup',
         version:1,created:stamp(ctx),creationOrder:9007199254740991n-stamp(ctx),updated:stamp(ctx)});
       ctx.db.mediaAssets.insert({id:mediaId,ownerId:user,key:'data:image/jpeg;base64,'+f.photoBase64,hash:mediaId,mime:'image/jpeg',width:0,height:0,visibility:'public',state:'ready',created:stamp(ctx)});
       ctx.db.listingMedia.insert({id:uid(ctx),listingId:id,mediaId,role:'cover',order:0});
       ctx.db.listingPickupWindows.insert({id:uid(ctx),listingId:id,locationId:locId,start:BigInt(p.start),end:BigInt(p.end),timezone:'America/Detroit'});
-      ctx.db.listingAttestations.insert({id:uid(ctx),listingId:id,version:1,sellerId:user,safeStorage:true,accurateCondition:true,noSpoilage:true,allergensDeclared:true,confirmed:stamp(ctx)});
       ctx.db.foodInventory.id.update({...f,listingID:id});indexListing(ctx,l);return {id};
     }
     case 'draft': {
@@ -447,14 +458,13 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
     case 'publish': {
       const l=ownedListing(ctx,user,q.resourceId);if(l.version!==q.version)fail('stale_version');if(l.status!=='draft')fail('invalid_transition');
       const safety=JSON.parse(q.text) as { safeStorage:boolean;accurateCondition:boolean;noSpoilage:boolean;allergensDeclared:boolean;pickupStart?:number;pickupEnd?:number };
-      if(safety.safeStorage!==true||safety.accurateCondition!==true||safety.noSpoilage!==true||safety.allergensDeclared!==true||!l.title||!l.price||!l.quantity||!l.storage||!l.allergens)fail('invalid_transition');
+      if(!l.title||!l.price||!l.quantity||!l.storage||!l.allergens)fail('invalid_transition');
       const media=[...ctx.db.listingMedia.listingId.filter(l.id)];if(!media.length||!media.every(m=>ctx.db.mediaAssets.id.find(m.mediaId)?.ownerId===user))fail('unauthorized');
       // The owner chooses a window; the server validates UTC timing and assigns the location relationship.
       const loc=[...ctx.db.pickupLocations.sellerId.filter(user)][0];if(!loc)fail('invalid_transition');
       const start=safety.pickupStart??now(ctx),end=safety.pickupEnd??now(ctx)+86400000;
       if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||end<=now(ctx)||end<=start||end>now(ctx)+259200000)fail('invalid_transition');
       ctx.db.listingPickupWindows.insert({id:uid(ctx),listingId:l.id,locationId:loc.id,start:BigInt(start),end:BigInt(end),timezone:'America/Detroit'});
-      ctx.db.listingAttestations.insert({id:uid(ctx),listingId:l.id,version:l.version,sellerId:user,safeStorage:true,accurateCondition:true,noSpoilage:true,allergensDeclared:true,confirmed:stamp(ctx)});
       for(const link of media){const m=ctx.db.mediaAssets.id.find(link.mediaId)!;ctx.db.mediaAssets.id.update({...m,visibility:'public'});}
       const published={...l,status:'published',updated:stamp(ctx),version:l.version+1};ctx.db.listings.id.update(published);indexListing(ctx,published);return {id:l.id,version:published.version};
     }
@@ -467,7 +477,7 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
       const mode=spec.mode||'Fastest';
       const originLat=spec.latitude??42.28,originLon=spec.longitude??-83.74;
       if(!Number.isFinite(originLat)||Math.abs(originLat)>90||!Number.isFinite(originLon)||Math.abs(originLon)>180)fail('invalid_transition');
-      if(activeRun(ctx,user))fail('invalid_transition');
+      if(activeRun(ctx,user)||[...ctx.db.pickupRuns.buyerId.filter(user)].some(r=>r.status==='draft'&&[...ctx.db.pickupStops.byRun.filter(r.id)].some(s=>s.status==='confirmed')))fail('invalid_transition');
       const savedItems=[...ctx.db.cartItems.buyerId.filter(user)];if(!savedItems.length)fail('invalid_transition');
       // Confirmation reserves the entire cart in this transaction; failure rolls back every claim.
       for (const i of savedItems) if (!i.reservationId) process(ctx,user,{...q,action:'reserve',resourceId:i.listingId});
@@ -483,17 +493,17 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
       while(remaining.length){remaining.sort((a,b)=>{
         const wa=[...ctx.db.listingPickupWindows.listingId.filter(a[0].listingId)][0];const wb=[...ctx.db.listingPickupWindows.listingId.filter(b[0].listingId)][0];
         const la=ctx.db.pickupLocations.id.find(wa.locationId)!;const lb=ctx.db.pickupLocations.id.find(wb.locationId)!;
-        const da=distance(lat,lon,la.latitude,la.longitude),dbb=distance(lat,lon,lb.latitude,lb.longitude);
+        const da=distance(lat,lon,la.exactLatitude,la.exactLongitude),dbb=distance(lat,lon,lb.exactLatitude,lb.exactLongitude);
         const costA=mode==='Fastest'?Math.max(da/15*3600000,Number(wa.start)-proposed):da;
         const costB=mode==='Fastest'?Math.max(dbb/15*3600000,Number(wb.start)-proposed):dbb;
         return (mode==='Best timing'?Number(wa.end-wb.end):costA-costB)||a[0].listingId.localeCompare(b[0].listingId);
       });const group=remaining.shift()!;const l=listing(ctx,group[0].listingId);const windows=group.map(i=>[...ctx.db.listingPickupWindows.listingId.filter(i.listingId)][0]);
         const w=windows[0];const loc=ctx.db.pickupLocations.id.find(w.locationId)!;
-        proposed=Math.max(proposed+Math.ceil(distance(lat,lon,loc.latitude,loc.longitude)/15*60)*60000,...windows.map(w=>Number(w.start)));
+        proposed=Math.max(proposed+Math.ceil(distance(lat,lon,loc.exactLatitude,loc.exactLongitude)/15*60)*60000,...windows.map(w=>Number(w.start)));
         const end=Math.min(...windows.map(w=>Number(w.end)));if(proposed>end)fail('unavailable');
         const stop=ctx.db.pickupStops.insert({id:uid(ctx),runId:run.id,buyerId:user,sellerId:l.sellerId,locationId:loc.id,sequence:seq++,proposed:BigInt(Math.round(proposed)),windowEnd:BigInt(end),status:'unconfirmed',phase:'idle'});
         for(const i of group)ctx.db.pickupStopItems.insert({id:uid(ctx),stopId:stop.id,listingId:i.listingId,reservationId:i.reservationId});
-        lat=loc.latitude;lon=loc.longitude;proposed+=300000;
+        lat=loc.exactLatitude;lon=loc.exactLongitude;proposed+=300000;
       }
       return runProjection(ctx,user);
     }
@@ -507,12 +517,28 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
         const stop=stops.find(s=>s.id===p.order[sequence])!,loc=ctx.db.pickupLocations.id.find(stop.locationId)!;
         const windows=[...ctx.db.pickupStopItems.stopId.filter(stop.id)].map(i=>[...ctx.db.listingPickupWindows.listingId.filter(i.listingId)].find(w=>w.locationId===loc.id&&w.end>now(ctx))!);
         if(windows.some(w=>!w))fail('expired');
-        proposed=Math.max(proposed+Math.ceil(distance(lat,lon,loc.latitude,loc.longitude)/15*60)*60000,...windows.map(w=>Number(w.start)));
+        proposed=Math.max(proposed+Math.ceil(distance(lat,lon,loc.exactLatitude,loc.exactLongitude)/15*60)*60000,...windows.map(w=>Number(w.start)));
         if(proposed>Number(stop.windowEnd))fail('unavailable');
         ctx.db.pickupStops.id.update({...stop,sequence,proposed:BigInt(Math.round(proposed))});
-        lat=loc.latitude;lon=loc.longitude;proposed+=300000;
+        lat=loc.exactLatitude;lon=loc.exactLongitude;proposed+=300000;
       }
       ctx.db.pickupRuns.id.update({...r,version:r.version+1});return runProjection(ctx,user);
+    }
+    case 'cancel_pickup_requests': {
+      const r=ctx.db.pickupRuns.id.find(q.resourceId);if(!r)fail('not_found');
+      if(r.buyerId!==user)fail('unauthorized');
+      if(r.status==='cancelled')return {};
+      if(r.status!=='draft')fail('invalid_transition');
+      for(const stop of [...ctx.db.pickupStops.byRun.filter(r.id)]) {
+        if(stop.status==='waiting'||stop.status==='confirmed') {
+          const c=conversation(ctx,user,stop.sellerId);
+          sendMessage(ctx,user,c.id,'I cancelled this pickup request.',`pickup-cancelled-${stop.id}`);
+        }
+        ctx.db.pickupStops.id.update({...stop,status:'skipped'});
+        for(const item of ctx.db.pickupStopItems.stopId.filter(stop.id))release(ctx,item.reservationId);
+      }
+      ctx.db.pickupRuns.id.update({...r,status:'cancelled',phase:'idle',version:r.version+1});
+      bumpCart(ctx,user);return {};
     }
     case 'coordinate': {
       const r=ctx.db.pickupRuns.id.find(q.resourceId);if(!r)fail('not_found');if(r.buyerId!==user)fail('unauthorized');if(r.status!=='draft')fail('invalid_transition');
@@ -529,7 +555,10 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
       if(s.proposed>s.windowEnd||s.windowEnd<now(ctx))fail('expired');
       for(const i of ctx.db.pickupStopItems.stopId.filter(s.id)){const reservation=checkClaim(ctx,i.reservationId);ctx.db.reservations.id.update({...reservation,status:'booked',expires:s.windowEnd+900000n});
         const task=ctx.db.scheduledExpiryTasks.id.find(reservation.id);if(task)ctx.db.scheduledExpiryTasks.scheduledId.update({...task,due:s.windowEnd+900000n,scheduledAt:ScheduleAt.time((s.windowEnd+900000n)*1000n)});}
-      ctx.db.pickupStops.id.update({...s,status:'confirmed'});return {};
+      ctx.db.pickupStops.id.update({...s,status:'confirmed'});
+      const c=conversation(ctx,s.buyerId,user);
+      sendMessage(ctx,user,c.id,"Pickup confirmed. Open your pickup trip to start directions. You'll pay at pickup using the demo payment.",`pickup-confirmed-${s.id}`);
+      bumpCart(ctx,s.buyerId);return {};
     }
     case 'schedule': {
       const s=ctx.db.pickupStops.id.find(q.resourceId);if(!s)fail('not_found');if(s.buyerId!==user&&s.sellerId!==user)fail('unauthorized');
@@ -557,8 +586,21 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
       const {s,r}=currentStop(ctx,user,q.resourceId);
       if(q.action==='handoff'){if(s.sellerId!==user)fail('unauthorized');if(r.phase!=='waiting')fail('invalid_transition');changePhase(ctx,s,r,'verifying');}
       else {if(s.buyerId!==user)fail('unauthorized');const transitions:Record<string,[string,string]>={arrive:['enroute','arrived'],announce:['arrived','waiting'],verify:['verifying','payment']};
-        const [from,to]=transitions[q.action];if(r.phase!==from)fail('invalid_transition');changePhase(ctx,s,r,to);}
+        const [from,to]=transitions[q.action];if(r.phase!==from)fail('invalid_transition');changePhase(ctx,s,r,to);
+        if(q.action==='announce'){const c=conversation(ctx,user,s.sellerId);sendMessage(ctx,user,c.id,"I'm here at the pickup pin. Please confirm the handoff when we meet.",`pickup-arrived-${s.id}`);}}
+
       return {};
+    }
+    case 'demo_payment': {
+      const stop=ctx.db.pickupStops.id.find(q.resourceId);if(!stop)fail('not_found');if(stop.buyerId!==user)fail('unauthorized');
+      const old=ctx.db.paymentAttempts.stopId.find(stop.id);
+      if(old?.status==='succeeded')return {id:old.id};
+      const {s,r}=currentStop(ctx,user,q.resourceId);if(r.phase!=='payment')fail('invalid_transition');
+      const amount=[...ctx.db.pickupStopItems.stopId.filter(s.id)].reduce((sum,i)=>sum+checkClaim(ctx,i.reservationId).price,0);
+      const row={id:old?.id??uid(ctx),buyerId:user,sellerId:s.sellerId,stopId:s.id,amount,status:'pending',provider:'',simulation:true};
+      if(old)ctx.db.paymentAttempts.id.update(row);else ctx.db.paymentAttempts.insert(row);
+      changePhase(ctx,s,r,'paying');
+      return JSON.parse(settleDemoPayment(ctx,row.id,true,`buyer-demo-${s.id}`).payload);
     }
     case 'payment': {
       const {s,r}=currentStop(ctx,user,q.resourceId);if(s.buyerId!==user)fail('unauthorized');
@@ -690,13 +732,13 @@ export const registerProfile = db.procedure({ token: t.string() }, Result, (ctx,
   }
 });
 
-export const completePayment = db.procedure({ attemptId:t.string(), succeeded:t.bool(), reference:t.string() }, Result, (ctx,q)=>ctx.withTx(tx=>{
-  simulator(tx,'payment');const p=tx.db.paymentAttempts.id.find(q.attemptId);if(!p)fail('not_found');
-  if(p.status==='succeeded' && (!q.succeeded || p.provider!==q.reference))fail('stale_version');
+function settleDemoPayment(tx: Ctx, attemptId: string, succeeded: boolean, reference: string) {
+  const p=tx.db.paymentAttempts.id.find(attemptId);if(!p)fail('not_found');
+  if(p.status==='succeeded' && (!succeeded || p.provider!==reference))fail('stale_version');
   if(p.status==='succeeded')return {apiVersion:1,serverTime:now(tx),error:'',payload:json({id:p.id})};
   if(p.status!=='pending')fail('invalid_transition');
   const {s,r}=currentStop(tx,p.buyerId,p.stopId);if(r.phase!=='paying')fail('invalid_transition');
-  if(!q.succeeded){tx.db.paymentAttempts.id.update({...p,status:'failed',provider:q.reference});changePhase(tx,s,r,'payment');return {apiVersion:1,serverTime:now(tx),error:'',payload:'{}'};}
+  if(!succeeded){tx.db.paymentAttempts.id.update({...p,status:'failed',provider:reference});changePhase(tx,s,r,'payment');return {apiVersion:1,serverTime:now(tx),error:'',payload:'{}'};}
   const receipt=tx.db.receipts.insert({id:uid(tx),buyerId:p.buyerId,sellerId:p.sellerId,stopId:s.id,paymentId:p.id,paid:p.amount,currency:'USD',completed:stamp(tx),simulation:true,sellerName:tx.db.users.id.find(p.sellerId)!.name});
   let saved=0,grams=0,items=0;
   for(const item of tx.db.pickupStopItems.stopId.filter(s.id)){
@@ -713,9 +755,12 @@ export const completePayment = db.procedure({ attemptId:t.string(), succeeded:t.
     if(tx.db.impactMonthly.id.find(id))tx.db.impactMonthly.id.update(updated);else tx.db.impactMonthly.insert(updated);
   }
   const stats=tx.db.sellerStats.userId.find(p.sellerId)!;tx.db.sellerStats.userId.update({...stats,completed:stats.completed+1});
-  tx.db.paymentAttempts.id.update({...p,status:'succeeded',provider:q.reference});
+  tx.db.paymentAttempts.id.update({...p,status:'succeeded',provider:reference});
   tx.db.pickupStops.id.update({...s,status:'paid',phase:'rescued'});tx.db.pickupRuns.id.update({...r,phase:'rescued',version:r.version+1});bumpCart(tx,p.buyerId);
   return {apiVersion:1,serverTime:now(tx),error:'',payload:json({receiptId:receipt.id})};
+}
+export const completePayment = db.procedure({ attemptId:t.string(), succeeded:t.bool(), reference:t.string() }, Result, (ctx,q)=>ctx.withTx(tx=>{
+  simulator(tx,'payment');return settleDemoPayment(tx,q.attemptId,q.succeeded,q.reference);
 }));
 export const completeAnalysis=db.procedure({jobId:t.string(),suggestions:t.string()},t.unit(),(ctx,q)=>ctx.withTx(tx=>{
   simulator(tx,'analysis');const job=tx.db.analysisJobs.id.find(q.jobId);if(!job)fail('not_found');

@@ -35,9 +35,9 @@ await good(other,'sensor_reading',{resourceId:foodID,text:JSON.stringify(sample)
 assert.equal((await good(other,'inventory')).readings.filter(r=>r.itemID===foodID).length,1);
 assert(!(await good(buyer,'inventory')).readings.some(r=>r.itemID===foodID));
 assert.equal((await api(other,'sensor_reading',{resourceId:foodID,text:JSON.stringify({...sample,humidity:150}),operationId:op()})).error,'invalid_transition');
-const listingReview={price:250,allergens:'None known',pickupAddress:'Museum of Art, Ann Arbor',latitude:42.275,longitude:-83.74,
-  start:Date.now()+3600000,end:Date.now()+10800000,safeStorage:true,accurateCondition:true,noSpoilage:true,allergensDeclared:true};
-assert.equal((await api(other,'inventory_publish',{resourceId:foodID,text:JSON.stringify({...listingReview,safeStorage:false}),operationId:op()})).error,'invalid_transition');
+const listingReview={retail:450,grams:454,price:250,allergens:'None known',pickupAddress:'Museum of Art, Ann Arbor',latitude:42.275,longitude:-83.74,
+  start:Date.now()+3600000,end:Date.now()+10800000};
+assert.equal((await api(other,'inventory_publish',{resourceId:foodID,text:JSON.stringify({...listingReview,retail:100}),operationId:op()})).error,'invalid_transition');
 const foodListing=await good(other,'inventory_publish',{resourceId:foodID,text:JSON.stringify(listingReview),operationId:op()});
 assert.equal((await good(other,'inventory')).items.find(i=>i.id===foodID).listingID,foodListing.id);
 const listedFood=(await good(buyer,'search',{text:JSON.stringify({query:'Roma Tomato'})})).listings.find(l=>l.id===foodListing.id);
@@ -57,6 +57,26 @@ const freshMessages=(await good(other,'messages',{resourceId:'demo-buyer:riley'}
 assert.equal(freshMessages.length,1);
 assert.equal(freshMessages[0].senderId,'demo-buyer');
 assert.equal((await api(other,'freshness',{resourceId:foodListing.id,operationId:op()})).error,'unavailable');
+const inbox=(await good(other,'bootstrap')).conversations.find(c=>c.id==='demo-buyer:riley');
+assert(inbox.unreadCount>0);assert.equal(inbox.summary,freshMessages[0].text);
+await good(other,'mark_read',{resourceId:inbox.id,value:inbox.sequence,operationId:op()});
+assert.equal((await good(other,'bootstrap')).conversations.find(c=>c.id===inbox.id).unreadCount,0);
+await good(other,'respond_freshness',{resourceId:fresh.id,operationId:op()});
+await good(other,'respond_freshness',{resourceId:fresh.id,operationId:op()});
+const updates=(await good(buyer,'messages',{resourceId:inbox.id})).messages.filter(m=>m.text.includes('Fresh Check update for Roma Tomato'));
+assert.equal(updates.length,1);
+const buyerInbox=(await good(buyer,'bootstrap')).conversations.find(c=>c.id===inbox.id);
+assert(buyerInbox.unreadCount>0);assert.equal(buyerInbox.summary,updates[0].text);
+assert.equal(listedFood.retail,450);assert(Math.abs(listedFood.weight-1)<0.01);
+await good(buyer,'add_cart',{resourceId:foodListing.id,operationId:op()});
+const cartPreview=await good(buyer,'bootstrap');
+assert(cartPreview.cartListings.some(l=>l.id===foodListing.id));
+const exactRun=await good(buyer,'plan',{text:JSON.stringify({latitude:42.2802,longitude:-83.7402}),operationId:op()});
+assert.equal(exactRun.stops[0].seller.latitude,listingReview.latitude);
+assert.equal(exactRun.stops[0].seller.longitude,listingReview.longitude);
+assert.equal((await api(other,'inventory_unlist',{resourceId:foodID,operationId:op()})).error,'unavailable');
+await good(buyer,'release',{resourceId:foodListing.id,operationId:op()});
+console.log('PASS: inbox preview, unread counts, mark read, Fresh Check response, savings, weight and precise pickup route');
 console.log('PASS: exact pickup coordinates, recorded storage snapshot, own listings excluded, Fresh Check seller message and duplicate protection');
 
 assert.equal((await api(other,'inventory_publish',{resourceId:foodID,text:JSON.stringify(listingReview),operationId:op()})).error,'invalid_transition');
@@ -65,6 +85,18 @@ assert(!(await good(buyer,'search',{text:JSON.stringify({query:'Roma Tomato'})})
 await good(other,'inventory_remove',{resourceId:foodID,operationId:op()});
 assert(!(await good(other,'inventory')).readings.some(r=>r.itemID===foodID));
 console.log('PASS: private scan ownership, sensor validation, reviewed listing with real-photo reference, unlist and deletion');
+
+const unknownID=op();
+await good(other,'inventory_save',{resourceId:unknownID,text:JSON.stringify({...food,name:'Banana',variety:'Unknown'}),operationId:op()});
+assert.equal((await good(other,'inventory')).items.find(i=>i.id===unknownID).variety,'');
+const bananaPin={...listingReview,pickupAddress:'Current location · dropped pin'};
+const bananaListing=await good(other,'inventory_publish',{resourceId:unknownID,text:JSON.stringify(bananaPin),operationId:op()});
+const bananaDetail=(await good(buyer,'detail',{resourceId:bananaListing.id})).listing;
+assert.equal(bananaDetail.name,'Banana');
+assert.equal(bananaDetail.latitude,bananaPin.latitude);assert.equal(bananaDetail.longitude,bananaPin.longitude);
+await good(other,'inventory_unlist',{resourceId:unknownID,operationId:op()});
+await good(other,'inventory_remove',{resourceId:unknownID,operationId:op()});
+console.log('PASS: unknown variety normalized, plain Banana title, GPS pin listing without a street address');
 
 // Saving a cart must not hold inventory or start seller coordination.
 for(const token of [buyer,other]){
@@ -137,10 +169,10 @@ console.log('PASS: seller-only confirmation/handoff, privacy unlock, booked expi
 const draft=await good(other,'draft',{operationId:op()});assert.equal((await api(buyer,'detail',{resourceId:draft.id})).error,'not_found');
 const edited=await good(other,'edit',{resourceId:draft.id,version:draft.version,text:JSON.stringify({title:'New seller oats',price:225,freshness:'Fresh'}),operationId:op()});
 await good(other,'attach_demo_media',{resourceId:draft.id,operationId:op()});
-assert.equal((await api(other,'publish',{resourceId:draft.id,version:edited.version,text:'{}',operationId:op()})).error,'invalid_transition');
-await good(other,'publish',{resourceId:draft.id,version:edited.version,text:JSON.stringify({safeStorage:true,accurateCondition:true,noSpoilage:true,allergensDeclared:true}),operationId:op()});
+assert.equal((await api(other,'publish',{resourceId:draft.id,version:edited.version,text:JSON.stringify({pickupEnd:0}),operationId:op()})).error,'invalid_transition');
+await good(other,'publish',{resourceId:draft.id,version:edited.version,text:'{}',operationId:op()});
 const found=await good(buyer,'search',{text:JSON.stringify({query:'oats'})});assert(found.listings.some(l=>l.id===draft.id));
-console.log('PASS: owned draft, individual attestations, genuine publish and discovery by another account');
+console.log('PASS: owned draft, genuine publish without checklist claims and discovery by another account');
 console.log(`Integration passed for ${winningId} in isolated local ${database}`);
 
 const hold=await good(other,'reserve',{resourceId:'yog',operationId:op()});
@@ -163,3 +195,46 @@ if(Number(process.env.RESCUE_SEED_COUNT||200)>500){
   assert.equal(next.candidateScans,500);assert(next.cursor);
   console.log('PASS: sparse filtered searches continue after 500 indexed candidates without dropping later matches');
 }
+
+// A buyer can complete the explicit demo at pickup without the local simulator worker.
+await good(other,'add_cart',{resourceId:'chips',operationId:op()});
+const demoRun=await good(other,'plan',{text:'Fastest',operationId:op()});
+const demoStop=demoRun.stops[0];
+await good(other,'coordinate',{resourceId:demoRun.id,operationId:op()});
+await good(maya,'confirm',{resourceId:demoStop.id,operationId:op()});
+let demoState=await good(other,'bootstrap');
+assert(!demoState.cart.includes('chips'));
+assert(demoState.run.stops.some(s=>s.id===demoStop.id&&s.status==='confirmed'));
+assert((await good(other,'messages',{resourceId:'maya:riley'})).messages.some(m=>m.text.includes('Pickup confirmed')));
+await good(other,'start',{resourceId:demoRun.id,operationId:op()});
+assert.equal((await api(other,'demo_payment',{resourceId:demoStop.id,operationId:op()})).error,'invalid_transition');
+await good(other,'arrive',{resourceId:demoStop.id,operationId:op()});
+await good(other,'announce',{resourceId:demoStop.id,operationId:op()});
+assert((await good(maya,'messages',{resourceId:'maya:riley'})).messages.some(m=>m.text.includes("I'm here")));
+assert.equal((await api(other,'demo_payment',{resourceId:demoStop.id,operationId:op()})).error,'invalid_transition');
+await good(maya,'handoff',{resourceId:demoStop.id,operationId:op()});
+await good(other,'verify',{resourceId:demoStop.id,operationId:op()});
+await call(ownerToken(),'configureLocal',[false]);
+const demoPaid=await good(other,'demo_payment',{resourceId:demoStop.id,operationId:op()});
+await good(other,'demo_payment',{resourceId:demoStop.id,operationId:op()});
+assert.equal((await api(maya,'demo_payment',{resourceId:demoStop.id,operationId:op()})).error,'unauthorized');
+await call(ownerToken(),'configureLocal',[true]);
+demoState=await good(other,'bootstrap');
+assert.equal(demoState.receipts.filter(r=>r.stopId===demoStop.id).length,1);
+assert.equal(demoState.run.phase,'rescued');
+await good(other,'advance',{resourceId:demoStop.id,operationId:op()});
+await good(other,'finish',{resourceId:demoRun.id,operationId:op()});
+console.log('PASS: confirmed cart removal, arrival message, cloud-mode buyer demo payment and duplicate receipt guard');
+
+await good(other,'add_cart',{resourceId:'bread',operationId:op()});
+const cancelledRun=await good(other,'plan',{text:'Fastest',operationId:op()});
+await good(other,'coordinate',{resourceId:cancelledRun.id,operationId:op()});
+assert.equal((await api(buyer,'cancel_pickup_requests',{resourceId:cancelledRun.id,operationId:op()})).error,'unauthorized');
+await good(other,'cancel_pickup_requests',{resourceId:cancelledRun.id,operationId:op()});
+await good(other,'cancel_pickup_requests',{resourceId:cancelledRun.id,operationId:op()});
+const afterCancel=await good(other,'bootstrap');
+assert(afterCancel.run===null||afterCancel.run.id!==cancelledRun.id);
+assert(!afterCancel.cart.includes('bread'));
+assert(!afterCancel.reservations.some(r=>r.status==='held'||r.status==='booked'));
+assert((await good(account(cancelledRun.stops[0].seller.id),'messages',{resourceId:[cancelledRun.stops[0].seller.id,'riley'].sort().join(':')})).messages.some(m=>m.text.includes('cancelled this pickup')));
+console.log('PASS: owned pickup cancellation removes requests and releases inventory, with retry guard');

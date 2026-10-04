@@ -1,3 +1,20 @@
+The final signed iPhone build passed (`/tmp/gusto-notifications-build.log`). Filtered Snacks
+and inline search gallery tests passed (`/tmp/gusto-gallery-ui.log`); clearing filters restored
+recommendations. The filtered gallery screenshot was visually inspected after export to
+`/tmp/gusto-gallery-attachments`. Following the deployment command, Maincloud was updated without deleting data and the app was installed on Noot Noot (iPhone 17 Pro). Automatic launch was blocked because the phone was locked. Logs: `/tmp/gusto-notifications-cloud-deploy.log`, `/tmp/gusto-notifications-phone-install.log`, `/tmp/gusto-notifications-phone-launch.log`.
+
+October 4 notifications/cart/inventory follow-up: 51 core tests passed with one opt-in skip.
+The isolated backend suite passed inbox summaries, unread counts and mark-read updates,
+Fresh Check replies once across retries, real-account cart previews, known original-price/weight
+values, exact pickup coordinates, reservation-blocked unlisting, removal and persistence after
+republishing. Publication now works without a safety checklist or fabricated attestation rows.
+Simulator tests passed cart/pickup, scan/sell keyboard and live-address selection, and the
+revised selling screen without a checklist. Logs: `/tmp/gusto-notifications-core.log`,
+`/tmp/gusto-notifications-backend.log`, `/tmp/gusto-notifications-ui.log`,
+`/tmp/gusto-notifications-sell-ui.log`. Foreground notification logic was checked through core
+and backend tests; physical two-phone notification delivery and GPS accuracy await device use.
+Deployment and installation are complete; launch and physical two-phone verification require unlocking the device.
+
 # Testing and verification
 
 October 4 final account/location/listing fixes: 49 core tests passed with one opt-in skip.
@@ -287,3 +304,34 @@ iPhone build passed using Xcode 26.3. Logs: `/tmp/gusto-fixes-core.log`,
 `--delete-data=never`; a read-only post-deployment query confirmed 197 published listings.
 These tests do not verify real payment processing, a physical seller-to-buyer exchange or the
 Google provider's account photo on the user's phone.
+
+## Pickup completion and scan naming — October 4, 2026
+
+The core suite passed 52 tests with one opt-in skip. The isolated backend suite passed confirmed
+pickup removal from the shopping cart, retained trip details, seller confirmation and buyer arrival
+messages, rejection of early/wrong-account demo payments, successful buyer demo payment with local
+simulation disabled, and a single receipt across retries. Non-destructive republish preserved data.
+The full four-seller Simulator pickup test passed arrival, handoff review, demo payment and trip
+summary. The focused scan review test passed labeled menus; backend checks passed normalized banana
+names and exact published GPS coordinates with a dropped-pin label. Physical GPS acquisition and
+two-phone pickup notifications remain unverified. The latest backend was deployed without deleting data, and the signed build was installed and
+launched on the connected iPhone 17 Pro. Installation and launch do not establish a completed
+two-phone pickup test.
+Logs: `/tmp/gusto-pickup-completion-core.log`, `/tmp/gusto-pickup-completion-backend.log`,
+`/tmp/gusto-pickup-completion-ui.log`, `/tmp/gusto-pickup-completion-device.log`,
+`/tmp/gusto-scan-pin-ui.log`.
+
+Pickup deployment logs: `/tmp/gusto-pickup-completion-cloud-deploy.log`,
+`/tmp/gusto-pickup-completion-phone-install.log`, `/tmp/gusto-pickup-completion-phone-launch.log`.
+
+Discover pickup-card placement: removed the root bottom inset and inserted the trip card below
+search in the feed. Signed iPhone build and installation passed. This layout-only follow-up did
+not repeat the pickup transaction tests. Logs: `/tmp/gusto-pickup-card-placement-build.log`,
+`/tmp/gusto-pickup-card-placement-install.log`, `/tmp/gusto-pickup-card-placement-launch.log`.
+
+Pickup cancellation: 53 core tests passed with one opt-in skip; isolated backend checks passed
+owner-only cancellation, released claims, removed cart entries, seller messaging and retries.
+Signed iPhone build passed; cloud deployed without deleting data and updated app installed.
+Logs: `/tmp/gusto-pickup-cancel-core.log`, `/tmp/gusto-pickup-cancel-backend.log`,
+`/tmp/gusto-pickup-cancel-build.log`, `/tmp/gusto-pickup-cancel-cloud.log`,
+`/tmp/gusto-pickup-cancel-install.log`, `/tmp/gusto-pickup-cancel-launch.log`.

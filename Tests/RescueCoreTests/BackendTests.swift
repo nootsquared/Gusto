@@ -60,6 +60,99 @@ private final class StubURLProtocol: URLProtocol {
             1, Date().timeIntervalSince1970 * 1000, error, String(decoding: payload, as: UTF8.self),
         ])
     }
+    func testRealSellerCartAndIncomingInboxUpdates() async throws {
+        var snapshot = try JSONSerialization.jsonObject(with: bootstrap("buyer")) as! [String: Any]
+        let seller = Seller(
+            id: "actual-seller", name: "Real Seller", rating: 5, pickups: 0,
+            responds: "Soon", student: false, area: "Pickup location", latitude: 42.28,
+            longitude: -83.74)
+        var itemJSON =
+            try JSONSerialization.jsonObject(with: JSONEncoder().encode(MockCatalog.listings[0]))
+            as! [String: Any]
+        itemJSON["sellerID"] = seller.id
+        let item = try JSONDecoder().decode(
+            Listing.self, from: JSONSerialization.data(withJSONObject: itemJSON))
+        snapshot["sellers"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode([seller]))
+        snapshot["cart"] = [item.id]
+        snapshot["cartListings"] = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode([item]))
+        var payload = try JSONSerialization.data(withJSONObject: snapshot)
+        StubURLProtocol.handler = { _ in try self.wire(payload) }
+        let store = AppStore()
+        await store.connect(repository("buyer"))
+        XCTAssertEqual(store.cartGroups.count, 1)
+        XCTAssertEqual(store.cartGroups.first?.seller.id, seller.id)
+        XCTAssertEqual(store.cartGroups.first?.items.first?.id, item.id)
+        XCTAssertEqual(store.cartTotals.saved, item.retail - item.price)
+        XCTAssertEqual(store.cartTotals.pounds, item.weight)
+        XCTAssertNil(store.incomingNotification)
+
+        snapshot["conversations"] = [
+            [
+                "id": "actual-seller:buyer", "buyerId": "buyer",
+                "sellerId": seller.id, "summary": "I'd like a pickup", "sequence": 1,
+                "lastRead": 0, "unreadCount": 1, "lastSenderId": seller.id, "lastMessageAt": 1000,
+            ]
+        ]
+        payload = try JSONSerialization.data(withJSONObject: snapshot)
+        await store.refreshBackend(force: true)
+        XCTAssertEqual(store.unreadMessageCount, 1)
+        XCTAssertEqual(store.incomingNotification?.senderID, seller.id)
+        XCTAssertEqual(store.messagePreview(for: seller.id), "I'd like a pickup")
+        XCTAssertEqual(store.messageSellers.first?.id, seller.id)
+        await store.refreshBackend(force: true)
+        XCTAssertEqual(store.incomingNotifications.count, 1)
+        store.dismissIncomingNotification()
+        await store.refreshBackend(force: true)
+        XCTAssertNil(store.incomingNotification)
+    }
+
+    func testInventoryWritesImmediatelyUpdateCollectionAndReportReservation() async throws {
+        let payload = try bootstrap("seller")
+        let food = InventoryFood(id: "food", name: "Banana", listingID: "listing")
+        let inventoryPayload = try JSONSerialization.data(withJSONObject: [
+            "items": try JSONSerialization.jsonObject(with: JSONEncoder().encode([food])),
+            "readings": [],
+        ])
+        var blocked = true
+        StubURLProtocol.handler = { request in
+            var body = request.httpBody ?? Data()
+            if body.isEmpty, let stream = request.httpBodyStream {
+                stream.open()
+                defer { stream.close() }
+                var buffer = [UInt8](repeating: 0, count: 4096)
+                while true {
+                    let count = stream.read(&buffer, maxLength: buffer.count)
+                    if count <= 0 { break }
+                    body.append(contentsOf: buffer.prefix(count))
+                }
+            }
+            let args = try JSONSerialization.jsonObject(with: body) as! [[String: Any]]
+            let command = args[0]
+            switch command["action"] as? String {
+            case "bootstrap": return try self.wire(payload)
+            case "inventory": return try self.wire(inventoryPayload)
+            case "inventory_unlist", "inventory_remove":
+                return try self.wire(Data("{}".utf8), error: blocked ? "unavailable" : "")
+            default: return try self.wire(Data("{}".utf8))
+            }
+        }
+        let store = AppStore()
+        await store.connect(repository("seller"))
+        await store.loadInventory()
+        let rejected = await store.unlistInventoryFood(food.id)
+        XCTAssertFalse(rejected)
+        XCTAssertEqual(store.inventory.first?.listingID, food.listingID)
+        XCTAssertTrue(store.notice?.contains("active pickup") ?? false)
+        blocked = false
+        let unlisted = await store.unlistInventoryFood(food.id)
+        XCTAssertTrue(unlisted)
+        XCTAssertEqual(store.inventory.first?.listingID, "")
+        let removed = await store.removeInventoryFood(food.id)
+        XCTAssertTrue(removed)
+        XCTAssertTrue(store.inventory.isEmpty)
+    }
+
     func testLiveSwiftBootstrap() async throws {
         guard ProcessInfo.processInfo.environment["RESCUE_LIVE_BACKEND"] == "1" else {
             throw XCTSkip("Local integration opt-in")
@@ -111,12 +204,14 @@ private final class StubURLProtocol: URLProtocol {
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer refreshed")
             return try self.wire(payload)
         }
-        let repo = HTTPRepository(server: URL(string: "https://example.com")!, database: "test",
+        let repo = HTTPRepository(
+            server: URL(string: "https://example.com")!, database: "test",
             session: BackendSession(userId: "a", token: "expired"), cacheRoot: folder,
             network: URLSession(configuration: configuration),
             sessionProvider: { BackendSession(userId: "a", token: "refreshed") })
         _ = try await repo.request(APIRequest("bootstrap"))
-        let wrong = HTTPRepository(server: URL(string: "https://example.com")!, database: "test",
+        let wrong = HTTPRepository(
+            server: URL(string: "https://example.com")!, database: "test",
             session: BackendSession(userId: "a", token: "expired"), cacheRoot: folder,
             network: URLSession(configuration: configuration),
             sessionProvider: { BackendSession(userId: "b", token: "other") })

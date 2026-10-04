@@ -29,9 +29,17 @@ struct DiscoverView: View {
     @State private var searchRequest = UUID()
     @FocusState private var searchFocused: Bool
     private var trimmedSearch: String { searchText.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var searchActive: Bool { searchFocused || !trimmedSearch.isEmpty }
+    private var filtersActive: Bool { store.filters != Filters() }
+    private var searchActive: Bool { searchFocused || !trimmedSearch.isEmpty || filtersActive }
     private var searchResults: [Listing] {
         if store.isBackend && completedSearch != trimmedSearch { return [] }
+        if store.isBackend && filtersActive {
+            return store.distinctSampleListings(
+                store.searchResults.filter {
+                    $0.sellerID != store.accountID
+                        && store.filters.accepts($0, sellers: store.sellers)
+                })
+        }
         return store.distinctSampleListings(store.visibleListings(query: trimmedSearch))
     }
     private struct SearchContext: Equatable {
@@ -45,9 +53,10 @@ struct DiscoverView: View {
         return feed.sorted { $0.distance < $1.distance }
     }
     private var picked: [Listing] {
-        return store.distinctSampleListings(store.personalizedListings.filter {
-            store.filters.accepts($0, sellers: store.sellers)
-        })
+        return store.distinctSampleListings(
+            store.personalizedListings.filter {
+                store.filters.accepts($0, sellers: store.sellers)
+            })
     }
     private var firstName: String? {
         let name = store.profileName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -138,6 +147,15 @@ struct DiscoverView: View {
                         .buttonStyle(.plain).accessibilityLabel("Filters")
                     }
                 }.padding(.horizontal, 20).padding(.top, 12)
+                if store.plan != nil && store.phase != .finished {
+                    Button {
+                        searchFocused = false
+                        router.sheet = .run
+                    } label: {
+                        LivePickupCard()
+                    }.buttonStyle(.plain).accessibilityIdentifier("active-run")
+                        .padding(.horizontal, 20).padding(.top, 16)
+                }
                 if searchActive {
                     searchContent
                 } else if store.isBackend && store.catalog.isEmpty && store.feedLoading {
@@ -277,7 +295,7 @@ struct DiscoverView: View {
             ) {
                 let request = UUID()
                 searchRequest = request
-                guard !trimmedSearch.isEmpty else {
+                guard !trimmedSearch.isEmpty || filtersActive else {
                     searchLoading = false
                     completedSearch = ""
                     return
@@ -289,7 +307,7 @@ struct DiscoverView: View {
                 completedSearch = query
                 searchLoading = false
             }.refreshable {
-                if !trimmedSearch.isEmpty {
+                if !trimmedSearch.isEmpty || filtersActive {
                     await store.searchBackend(trimmedSearch)
                 } else {
                     await store.refreshBackend(force: true)
@@ -333,19 +351,20 @@ struct DiscoverView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Text(
-                    trimmedSearch.isEmpty
+                    trimmedSearch.isEmpty && !filtersActive
                         ? "Browse by category"
                         : searchLoading ? "Searching…" : "\(searchResults.count) nearby"
                 )
                 .rescueFont(20, .semibold)
                 Spacer()
-                Button("Cancel") {
+                Button(filtersActive ? "Clear filters" : "Cancel") {
                     searchFocused = false
                     searchText = ""
+                    if filtersActive { store.filters = Filters() }
                 }.rescueFont(14, .semibold).foregroundStyle(Theme.save)
                     .accessibilityIdentifier("cancel-search")
             }
-            if trimmedSearch.isEmpty {
+            if trimmedSearch.isEmpty && !filtersActive {
                 let categories = Array(Set(feed.map(\.category))).sorted()
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                     ForEach(categories, id: \.self) { category in
@@ -389,15 +408,18 @@ struct DiscoverView: View {
                         .rescueFont(14, .semibold).foregroundStyle(Theme.save).padding(.top, 4)
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(24).card(radius: 24)
             } else {
-                LazyVStack(spacing: 12) {
+                LazyVGrid(
+                    columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading,
+                    spacing: 22
+                ) {
                     ForEach(searchResults) { item in
                         DiscoverSearchCard(item: item)
                     }
-                    if store.isBackend && !store.searchCursor.isEmpty {
-                        ProgressView().tint(Theme.save).padding(12)
-                            .task(id: store.searchCursor) { await store.loadSearchPage() }
-                    }
                 }.accessibilityIdentifier("search-results")
+                if store.isBackend && !store.searchCursor.isEmpty {
+                    ProgressView().tint(Theme.save).padding(12)
+                        .task(id: store.searchCursor) { await store.loadSearchPage() }
+                }
             }
         }.padding(.horizontal, 20).padding(.top, 28)
     }
@@ -421,25 +443,19 @@ private struct DiscoverSearchCard: View {
     @Environment(AppRouter.self) private var router
     let item: Listing
     var body: some View {
-        HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 9) {
             Button {
                 router.sheet = .listing(item.id)
             } label: {
-                HStack(spacing: 14) {
-                    FoodPhoto(name: item.image).frame(width: 76, height: 86)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text(item.name).rescueFont(16, .semibold).lineLimit(2)
-                        ListingOffer(item: item, priceSize: 18)
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                }.foregroundStyle(Theme.ink).contentShape(Rectangle())
+                FoodPhoto(name: item.image).aspectRatio(1, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
             }.buttonStyle(.plain).accessibilityIdentifier("result-\(item.id)")
-            AddButton(item: item)
-        }.padding(12).background(Theme.paper, in: RoundedRectangle(cornerRadius: 22))
-            .overlay(
-                RoundedRectangle(cornerRadius: 22).stroke(Theme.line.opacity(0.7), lineWidth: 1)
-            )
-            .shadow(color: Theme.deep.opacity(0.035), radius: 10, y: 4)
+                .accessibilityLabel("\(item.name), \(Money.text(item.price))")
+                .overlay(alignment: .bottomTrailing) { AddButton(item: item).padding(4) }
+            Text(item.name).rescueFont(15, .semibold).lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            ListingOffer(item: item, priceSize: 18)
+        }.frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }
 

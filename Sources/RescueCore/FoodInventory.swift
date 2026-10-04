@@ -42,7 +42,17 @@ public struct InventoryFood: Codable, Identifiable, Equatable, Sendable {
         self.listingID = listingID
         self.deviceID = deviceID
     }
-    public var title: String { variety.isEmpty ? name : "\(variety) \(name)" }
+    public static func cleanVariety(_ variety: String, foodName: String = "") -> String {
+        let value = variety.trimmingCharacters(in: .whitespacesAndNewlines)
+        let placeholder = ["unknown", "unknown variety", "unspecified", "not identified", "not known", "n/a", "none"]
+        if placeholder.contains(value.lowercased()) || value.caseInsensitiveCompare(foodName.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame { return "" }
+        return value
+    }
+    public var title: String {
+        let foodName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let kind = Self.cleanVariety(variety, foodName: foodName)
+        return kind.isEmpty ? foodName : "\(kind) \(foodName)"
+    }
     public var isListed: Bool { !listingID.isEmpty }
 }
 

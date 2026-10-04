@@ -7,6 +7,20 @@ import XCTest
 #endif
 
 @MainActor final class RescueCoreTests: XCTestCase {
+    func testCancelPickupRequestsClearsPlanAndAllowsReplanning() async {
+        let store = makeStore()
+        store.addToCart("bread")
+        store.makePlan()
+        XCTAssertNotNil(store.plan)
+        let cancelled = await store.cancelPickupRequests()
+        XCTAssertTrue(cancelled)
+        XCTAssertNil(store.plan)
+        XCTAssertTrue(store.cart.isEmpty)
+        store.addToCart("bread")
+        store.makePlan()
+        XCTAssertNotNil(store.plan)
+    }
+
     private func makeStore() -> AppStore { AppStore(service: DemoService(delayNanoseconds: 0)) }
     private func reserveDemo(_ store: AppStore) {
         for id in ["straw", "yog", "bread", "pasta"] { XCTAssertTrue(store.addToCart(id)) }

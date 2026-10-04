@@ -7,6 +7,12 @@ import XCTest
 #endif
 
 final class FoodInventoryTests: XCTestCase {
+    func testUnknownVarietyDoesNotBecomePartOfFoodTitle() {
+        for variety in ["Unknown", " unknown ", "Unknown variety", "N/A", "Banana", ""] {
+            XCTAssertEqual(InventoryFood(name: "Banana", variety: variety).title, "Banana")
+        }
+        XCTAssertEqual(InventoryFood(name: "Banana", variety: "Cavendish").title, "Cavendish Banana")
+    }
     func testQualityEstimateRequiresMatchedFoodAndRealHistoryAndShrinksWithHeat() throws {
         let now = 1_000_000_000.0
         var item = InventoryFood(id: "banana", name: "Banana", condition: "Ripe", scannedAt: now, deviceID: "sensor")
@@ -79,8 +85,7 @@ final class FoodInventoryTests: XCTestCase {
         let listed = await store.sellInventoryFood(
             item, price: 250, allergens: "None known",
             pickupAddress: "Ann Arbor", latitude: 42.28, longitude: -83.74,
-            start: Date().addingTimeInterval(3600), end: Date().addingTimeInterval(7200),
-            attestations: true)
+            start: Date().addingTimeInterval(3600), end: Date().addingTimeInterval(7200))
         XCTAssertTrue(listed)
         let listingID = store.inventory.first!.listingID
         XCTAssertEqual(store.listing(listingID)?.name, "Roma Tomato")

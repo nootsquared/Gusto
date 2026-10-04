@@ -10,7 +10,8 @@ struct BrowseLocation: Codable, Equatable {
 }
 
 /// Foreground location only. A manually chosen place takes priority over GPS callbacks.
-@MainActor @Observable final class LocationController: NSObject, @preconcurrency CLLocationManagerDelegate {
+@MainActor @Observable
+final class LocationController: NSObject, @preconcurrency CLLocationManagerDelegate {
     var selection: BrowseLocation?
     var usingGPS = false
     var locating = false
@@ -35,7 +36,9 @@ struct BrowseLocation: Codable, Equatable {
         if let data = preferences.data(forKey: defaultsKey) {
             selection = try? JSONDecoder().decode(BrowseLocation.self, from: data)
         }
-        usingGPS = preferences.object(forKey: "gusto.use-gps") == nil || preferences.bool(forKey: "gusto.use-gps")
+        usingGPS =
+            preferences.object(forKey: "gusto.use-gps") == nil
+            || preferences.bool(forKey: "gusto.use-gps")
         // Older Simulator address tests wrote this fixture into the real app preferences.
         if !preferences.bool(forKey: "gusto.location-choice-v2") {
             if selection?.name.localizedCaseInsensitiveContains("Michigan Museum of Art") == true {
@@ -47,16 +50,28 @@ struct BrowseLocation: Codable, Equatable {
             preferences.set(true, forKey: "gusto.location-choice-v2")
         }
         manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
-        manager.distanceFilter = 25
+        manager.desiredAccuracy = kCLLocationAccuracyBest
+        manager.distanceFilter = 5
     }
     var label: String {
         if usingGPS { return "Current location" }
         if let selection { return selection.shortName ?? selection.name }
         return "Choose location"
     }
-    func useCurrentLocation() {
-        if !usingGPS { selection = nil }
+    /// A country/city result is not a pickup address. The coordinate remains the destination.
+    static func streetAddress(_ placemark: CLPlacemark) -> String? {
+        guard let street = placemark.thoroughfare?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !street.isEmpty else { return nil }
+        let line = [placemark.subThoroughfare, street].compactMap { $0 }.joined(separator: " ")
+        return [line, placemark.locality, placemark.administrativeArea, placemark.postalCode]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+    func useCurrentLocation(refresh: Bool = false) {
+        if refresh || !usingGPS {
+            selection = nil
+            lookupGeneration = UUID()
+            geocoder.cancelGeocode()
+        }
         preferences.removeObject(forKey: defaultsKey)
         usingGPS = true
         preferences.set(true, forKey: "gusto.use-gps")
@@ -73,8 +88,10 @@ struct BrowseLocation: Codable, Equatable {
     private func startGPS() {
         fixTimeout?.cancel()
         // Reuse a fresh system fix; resuming an unchanged location may emit no new callback.
-        if let cached = manager.location, cached.horizontalAccuracy >= 0, cached.horizontalAccuracy <= 100,
-           abs(cached.timestamp.timeIntervalSinceNow) < 60 {
+        if let cached = manager.location, cached.horizontalAccuracy >= 0,
+            cached.horizontalAccuracy <= 100,
+            abs(cached.timestamp.timeIntervalSinceNow) < 15
+        {
             locationManager(manager, didUpdateLocations: [cached])
         }
         manager.startUpdatingLocation()
@@ -84,12 +101,14 @@ struct BrowseLocation: Codable, Equatable {
                 do { try await Task.sleep(for: .seconds(10)) } catch { return }
                 guard let self, self.usingGPS, self.locating else { return }
                 self.locating = false
-                self.message = "Couldn't get a precise location. Enable Precise Location in Settings or search an address."
+                self.message =
+                    "Couldn't get a precise location. Enable Precise Location in Settings or search an address."
             }
         }
     }
     func requestInitially() {
-        guard selection == nil, usingGPS || !preferences.bool(forKey: "gusto.location-prompted") else { return }
+        guard selection == nil, usingGPS || !preferences.bool(forKey: "gusto.location-prompted")
+        else { return }
         preferences.set(true, forKey: "gusto.location-prompted")
         useCurrentLocation()
     }
@@ -112,26 +131,32 @@ struct BrowseLocation: Codable, Equatable {
         }
     }
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard usingGPS, let location = locations.last, location.horizontalAccuracy >= 0, location.horizontalAccuracy <= 100,
-              abs(location.timestamp.timeIntervalSinceNow) < 60 else { return }
+        guard usingGPS, let location = locations.last, location.horizontalAccuracy >= 0,
+            location.horizontalAccuracy <= 100,
+            abs(location.timestamp.timeIntervalSinceNow) < 60
+        else { return }
         fixTimeout?.cancel()
         locating = false
         message = nil
         if let old = selection,
-           CLLocation(latitude: old.latitude, longitude: old.longitude).distance(from: location) < 25 {
+            CLLocation(latitude: old.latitude, longitude: old.longitude).distance(from: location)
+                < 5
+        {
             return
         }
         let generation = UUID()
         lookupGeneration = generation
-        selection = BrowseLocation(latitude: location.coordinate.latitude,
-                                   longitude: location.coordinate.longitude, name: "your location")
+        selection = BrowseLocation(
+            latitude: location.coordinate.latitude,
+            longitude: location.coordinate.longitude, name: "your location")
         geocoder.cancelGeocode()
         geocoder.reverseGeocodeLocation(location) { [weak self] placemarks, _ in
             Task { @MainActor in
                 guard let self, self.usingGPS, self.lookupGeneration == generation else { return }
                 let place = placemarks?.first
                 self.selection = BrowseLocation(
-                    latitude: location.coordinate.latitude, longitude: location.coordinate.longitude,
+                    latitude: location.coordinate.latitude,
+                    longitude: location.coordinate.longitude,
                     name: place?.subLocality ?? place?.locality ?? place?.name ?? "your location")
             }
         }
@@ -146,13 +171,17 @@ struct BrowseLocation: Codable, Equatable {
         search = nil
         results = []
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { searching = false; return }
+        guard !text.isEmpty else {
+            searching = false
+            return
+        }
         searching = true
         let request = MKLocalSearch.Request()
         request.naturalLanguageQuery = text
         if let selection {
             request.region = MKCoordinateRegion(
-                center: CLLocationCoordinate2D(latitude: selection.latitude, longitude: selection.longitude),
+                center: CLLocationCoordinate2D(
+                    latitude: selection.latitude, longitude: selection.longitude),
                 latitudinalMeters: 50000, longitudinalMeters: 50000)
         }
         let operation = MKLocalSearch(request: request)
@@ -161,7 +190,8 @@ struct BrowseLocation: Codable, Equatable {
             let response = try await operation.start()
             guard search === operation else { return }
             results = response.mapItems
-            message = results.isEmpty ? "No places found. Try a city, neighborhood, or address." : nil
+            message =
+                results.isEmpty ? "No places found. Try a city, neighborhood, or address." : nil
         } catch {
             guard search === operation else { return }
             message = "Place search is unavailable. Check your connection and try again."
@@ -177,10 +207,11 @@ struct BrowseLocation: Codable, Equatable {
         lookupGeneration = UUID()
         locating = false
         message = nil
-        selection = BrowseLocation(latitude: item.placemark.coordinate.latitude,
-                                   longitude: item.placemark.coordinate.longitude,
-                                   name: item.name ?? item.placemark.locality ?? "selected location",
-                                   shortName: item.placemark.subLocality ?? item.placemark.locality ?? item.name)
+        selection = BrowseLocation(
+            latitude: item.placemark.coordinate.latitude,
+            longitude: item.placemark.coordinate.longitude,
+            name: item.name ?? item.placemark.locality ?? "selected location",
+            shortName: item.placemark.subLocality ?? item.placemark.locality ?? item.name)
         if let data = try? JSONEncoder().encode(selection) {
             preferences.set(data, forKey: defaultsKey)
         }

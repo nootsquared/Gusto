@@ -54,8 +54,10 @@ struct ScanView: View {
                         }.frame(width: 180, height: 190)
                     }.padding(.trailing, 14).padding(.bottom, 92).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 12) {
-                        Image(systemName: "camera.viewfinder").font(.system(size: 64, weight: .medium))
-                            .padding(.bottom, 12)
+                        Image(systemName: "camera.viewfinder").font(
+                            .system(size: 64, weight: .medium)
+                        )
+                        .padding(.bottom, 12)
                         Text("Keep track\nof your food.").rescueFont(25, .bold).tracking(
                             -0.5
                         )
@@ -130,10 +132,16 @@ struct ScanView: View {
                             Theme.secondary)
                     }
                     HStack(spacing: 6) {
-                        inventoryFilter("My collection", count: store.inventory.filter { !$0.isListed }.count, selected: !listedOnly) {
+                        inventoryFilter(
+                            "My collection", count: store.inventory.filter { !$0.isListed }.count,
+                            selected: !listedOnly
+                        ) {
                             listedOnly = false
                         }
-                        inventoryFilter("For sale", count: store.inventory.filter { $0.isListed }.count, selected: listedOnly) { listedOnly = true }
+                        inventoryFilter(
+                            "For sale", count: store.inventory.filter { $0.isListed }.count,
+                            selected: listedOnly
+                        ) { listedOnly = true }
                     }.padding(5).background(Theme.bone, in: Capsule())
                     if store.inventoryLoading {
                         ProgressView().frame(maxWidth: .infinity).padding(24)
@@ -178,11 +186,17 @@ struct ScanView: View {
                                             ).padding(10)
                                         }
                                         Text(item.title).rescueFont(16, .semibold).lineLimit(2)
-                                        if let estimate = FoodQualityEstimate.estimate(item, readings: store.storageReadings) {
-                                            Text(estimate.label).rescueFont(12, .semibold).foregroundStyle(Theme.save)
+                                        if let estimate = FoodQualityEstimate.estimate(
+                                            item, readings: store.storageReadings)
+                                        {
+                                            Text(estimate.label).rescueFont(12, .semibold)
+                                                .foregroundStyle(Theme.save)
                                         } else {
-                                            Text(item.deviceID.isEmpty ? "Not monitored" : "Waiting for sensor history")
-                                                .rescueFont(12).foregroundStyle(Theme.secondary)
+                                            Text(
+                                                item.deviceID.isEmpty
+                                                    ? "Not monitored" : "Waiting for sensor history"
+                                            )
+                                            .rescueFont(12).foregroundStyle(Theme.secondary)
                                         }
                                     }.foregroundStyle(Theme.ink)
                                 }.buttonStyle(.plain).accessibilityIdentifier(
@@ -228,7 +242,9 @@ struct ScanView: View {
     private var visibleItems: [InventoryFood] {
         store.inventory.filter { listedOnly ? $0.isListed : !$0.isListed }
     }
-    private func inventoryFilter(_ title: String, count: Int, selected: Bool, action: @escaping () -> Void)
+    private func inventoryFilter(
+        _ title: String, count: Int, selected: Bool, action: @escaping () -> Void
+    )
         -> some View
     {
         Button {
@@ -240,8 +256,8 @@ struct ScanView: View {
                     .padding(.horizontal, 6).padding(.vertical, 3)
                     .background(Theme.deep.opacity(0.08), in: Capsule())
             }.foregroundStyle(selected ? Theme.deep : Theme.secondary)
-            .frame(maxWidth: .infinity).padding(.vertical, 11).background(
-                selected ? Theme.paper : .clear, in: Capsule())
+                .frame(maxWidth: .infinity).padding(.vertical, 11).background(
+                    selected ? Theme.paper : .clear, in: Capsule())
         }.buttonStyle(.plain)
     }
 }
@@ -292,9 +308,13 @@ struct ScanReviewView: View {
             VStack(alignment: .leading, spacing: 20) {
                 InventoryPhoto(item: scanner.draft).frame(height: 240).clipShape(
                     RoundedRectangle(cornerRadius: 26))
-                if !scanner.originalPhotoBase64.isEmpty && scanner.draft.photoBase64 != scanner.originalPhotoBase64 {
-                    Button("Use full photo") { scanner.draft.photoBase64 = scanner.originalPhotoBase64 }
-                        .rescueFont(13, .semibold).foregroundStyle(Theme.save)
+                if !scanner.originalPhotoBase64.isEmpty
+                    && scanner.draft.photoBase64 != scanner.originalPhotoBase64
+                {
+                    Button("Use full photo") {
+                        scanner.draft.photoBase64 = scanner.originalPhotoBase64
+                    }
+                    .rescueFont(13, .semibold).foregroundStyle(Theme.save)
                 }
                 if scanner.analyzing {
                     HStack(spacing: 12) {
@@ -307,7 +327,9 @@ struct ScanReviewView: View {
                             Text("Photo analysis unavailable").rescueFont(16, .semibold)
                             Text(error).rescueFont(13).foregroundStyle(Theme.secondary)
                             Button("Try Gemini again") {
-                                guard let data = Data(base64Encoded: scanner.originalPhotoBase64), let image = UIImage(data: data) else { return }
+                                guard let data = Data(base64Encoded: scanner.originalPhotoBase64),
+                                    let image = UIImage(data: data)
+                                else { return }
                                 Task { await scanner.identify(image, store: store) }
                             }.rescueFont(14, .semibold).foregroundStyle(Theme.save)
                         }.padding(18).card(radius: 20)
@@ -322,8 +344,8 @@ struct ScanReviewView: View {
                             scanner.draft.identification == "Gemini"
                                 ? "Suggested from your photo · check the details before saving."
                                 : scanner.draft.identification == "Apple Vision"
-                                ? "On-device suggestion · confirm the food and variety below."
-                                : "Add the food name. Variety and condition need your review."
+                                    ? "On-device suggestion · confirm the food and variety below."
+                                    : "Add the food name. Variety and condition need your review."
                         )
                         .rescueFont(14).foregroundStyle(Theme.secondary)
                     }
@@ -340,19 +362,12 @@ struct ScanReviewView: View {
                         scanField(
                             "Quantity", text: $scanner.draft.quantity,
                             placeholder: "e.g. 3 tomatoes", id: "scan-quantity")
-                        Picker("Category", selection: $scanner.draft.category) {
-                            ForEach(["Produce", "Dairy", "Bakery", "Pantry", "Breakfast", "Snacks", "Prepared"], id: \.self) { Text($0).tag($0) }
-                        }.rescueFont(15)
-                        Picker("Condition", selection: $scanner.draft.condition) {
-                            ForEach(["Not assessed", "Unripe", "Ripe", "Use soon"], id: \.self) {
-                                Text($0).tag($0)
-                            }
-                        }.rescueFont(15)
-                        Picker("Stored in", selection: $scanner.draft.storage) {
-                            ForEach(["Counter", "Fridge", "Pantry"], id: \.self) {
-                                Text($0).tag($0)
-                            }
-                        }.rescueFont(15)
+                        scanPicker("Category", selection: $scanner.draft.category,
+                            options: ["Produce", "Dairy", "Bakery", "Pantry", "Breakfast", "Snacks", "Prepared"])
+                        scanPicker("Condition", selection: $scanner.draft.condition,
+                            options: ["Not assessed", "Unripe", "Ripe", "Use soon"])
+                        scanPicker("Storage", selection: $scanner.draft.storage,
+                            options: ["Counter", "Fridge", "Pantry"])
                     }.padding(20).card(radius: 24)
                     Label("Saved privately. Nothing is listed for sale yet.", systemImage: "lock")
                         .rescueFont(13).foregroundStyle(Theme.secondary)
@@ -389,6 +404,17 @@ struct ScanReviewView: View {
             Text(store.notice ?? "Check your connection and try again.")
         }
     }
+    private func scanPicker(_ title: String, selection: Binding<String>, options: [String]) -> some View {
+        HStack {
+            Text(title).rescueFont(14, .medium).foregroundStyle(Theme.secondary)
+            Spacer()
+            Picker(title, selection: selection) {
+                ForEach(options, id: \.self) { Text($0).tag($0) }
+            }.pickerStyle(.menu).labelsHidden().rescueFont(15)
+                .accessibilityLabel(title)
+                .accessibilityIdentifier("scan-picker-\(title.lowercased())")
+        }
+    }
     private func scanField(_ label: String, text: Binding<String>, placeholder: String, id: String)
         -> some View
     {
@@ -406,6 +432,8 @@ struct InventoryDetailView: View {
     @Environment(FoodScanController.self) private var scanner
     let id: String
     @State private var removePrompt = false
+    @State private var itemActionBusy = false
+    @State private var itemActionError: String?
     private var food: InventoryFood? { store.inventory.first { $0.id == id } }
     var body: some View {
         ScrollView {
@@ -443,7 +471,9 @@ struct InventoryDetailView: View {
                                 icon: "humidity")
                             sensorMetric(
                                 "Light",
-                                value: summary.map { String(format: "%.0f %@", $0.light, $0.lightUnit) } ?? "—",
+                                value: summary.map {
+                                    String(format: "%.0f %@", $0.light, $0.lightUnit)
+                                } ?? "—",
                                 icon: "sun.max")
                         }
                         Text(
@@ -462,19 +492,33 @@ struct InventoryDetailView: View {
                             if !item.deviceID.isEmpty {
                                 Task { await store.trackInventoryFood(item.id, deviceID: "") }
                             } else if let device = scanner.sensor.connected {
-                                Task { await store.trackInventoryFood(item.id, deviceID: device.identifier.uuidString) }
-                            } else { router.sheet = .sensor }
+                                Task {
+                                    await store.trackInventoryFood(
+                                        item.id, deviceID: device.identifier.uuidString)
+                                }
+                            } else {
+                                router.sheet = .sensor
+                            }
                         } label: {
                             HStack(spacing: 12) {
-                                Image(systemName: item.deviceID.isEmpty ? "square" : "checkmark.square.fill")
-                                    .font(.system(size: 22, weight: .medium)).foregroundStyle(Theme.save)
+                                Image(
+                                    systemName: item.deviceID.isEmpty
+                                        ? "square" : "checkmark.square.fill"
+                                )
+                                .font(.system(size: 22, weight: .medium)).foregroundStyle(
+                                    Theme.save)
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("Track with sensor").rescueFont(15, .semibold)
-                                    Text(item.deviceID.isEmpty ? "Link this item to your storage sensor" : "Recording while the sensor is connected")
-                                        .rescueFont(12).foregroundStyle(Theme.secondary)
+                                    Text(
+                                        item.deviceID.isEmpty
+                                            ? "Link this item to your storage sensor"
+                                            : "Recording while the sensor is connected"
+                                    )
+                                    .rescueFont(12).foregroundStyle(Theme.secondary)
                                 }
                                 Spacer()
-                            }.padding(14).background(Theme.soft, in: RoundedRectangle(cornerRadius: 16))
+                            }.padding(14).background(
+                                Theme.soft, in: RoundedRectangle(cornerRadius: 16))
                         }.buttonStyle(.plain).disabled(store.backendBusy)
                             .accessibilityIdentifier("track-with-sensor")
                             .accessibilityValue(item.deviceID.isEmpty ? "Off" : "On")
@@ -494,23 +538,37 @@ struct InventoryDetailView: View {
                     }
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Estimated quality window").rescueFont(19, .semibold)
-                        if let estimate = FoodQualityEstimate.estimate(item, readings: store.storageReadings) {
+                        if let estimate = FoodQualityEstimate.estimate(
+                            item, readings: store.storageReadings)
+                        {
                             Text(estimate.label).rescueFont(29, .bold).foregroundStyle(Theme.save)
                             let lastDay = Date().addingTimeInterval(estimate.daysMax * 86400)
-                            Text("Check by \(lastDay.formatted(date: .abbreviated, time: .omitted))")
-                                .rescueFont(14, .semibold)
-                            Text("Based on \(estimate.samples) readings averaging \(String(format: "%.1f°C", estimate.temperature)) and \(Int(estimate.humidity))% humidity.")
-                                .rescueFont(13).foregroundStyle(Theme.secondary)
+                            Text(
+                                "Check by \(lastDay.formatted(date: .abbreviated, time: .omitted))"
+                            )
+                            .rescueFont(14, .semibold)
+                            Text(
+                                "Based on \(estimate.samples) readings averaging \(String(format: "%.1f°C", estimate.temperature)) and \(Int(estimate.humidity))% humidity."
+                            )
+                            .rescueFont(13).foregroundStyle(Theme.secondary)
                         } else {
-                            Text(item.deviceID.isEmpty ? "Link a sensor to see an estimate" : "Waiting for usable food and sensor data")
-                                .rescueFont(15, .semibold).foregroundStyle(Theme.secondary)
+                            Text(
+                                item.deviceID.isEmpty
+                                    ? "Link a sensor to see an estimate"
+                                    : "Waiting for usable food and sensor data"
+                            )
+                            .rescueFont(15, .semibold).foregroundStyle(Theme.secondary)
                         }
                         if let a = item.scanAnalysis {
-                            Text("Suggested storage: \(Int(a.idealTemperatureMin))–\(Int(a.idealTemperatureMax))°C · \(Int(a.idealHumidityMin))–\(Int(a.idealHumidityMax))% RH")
-                                .rescueFont(13).foregroundStyle(Theme.secondary)
+                            Text(
+                                "Suggested storage: \(Int(a.idealTemperatureMin))–\(Int(a.idealTemperatureMax))°C · \(Int(a.idealHumidityMin))–\(Int(a.idealHumidityMax))% RH"
+                            )
+                            .rescueFont(13).foregroundStyle(Theme.secondary)
                         }
-                        Text("An approximate quality guide, not a safety expiry date. Check the food and any label before eating.")
-                            .rescueFont(12).foregroundStyle(Theme.muted)
+                        Text(
+                            "An approximate quality guide, not a safety expiry date. Check the food and any label before eating."
+                        )
+                        .rescueFont(12).foregroundStyle(Theme.muted)
                     }.padding(18).card(radius: 24)
                     HStack {
                         Text(
@@ -518,6 +576,7 @@ struct InventoryDetailView: View {
                         ).rescueFont(12).foregroundStyle(Theme.muted)
                         Spacer()
                         Button("Remove", role: .destructive) { removePrompt = true }.rescueFont(13)
+                            .disabled(itemActionBusy || store.backendBusy)
                     }
                 }.padding(20)
             }
@@ -531,9 +590,19 @@ struct InventoryDetailView: View {
                         PrimaryButton(
                             title: "View listing", symbol: "arrow.up.right", color: Theme.deep
                         ) { router.sheet = .listing(item.listingID) }
-                        Button("Take off the marketplace") {
-                            Task { await store.unlistInventoryFood(item.id) }
+                        Button(itemActionBusy ? "Removing listing…" : "Take off the marketplace") {
+                            itemActionBusy = true
+                            Task {
+                                if !(await store.unlistInventoryFood(item.id)) {
+                                    itemActionError =
+                                        store.notice ?? "Couldn't remove the listing. Try again."
+                                } else {
+                                    Haptic.success()
+                                }
+                                itemActionBusy = false
+                            }
                         }.rescueFont(13).foregroundStyle(Theme.secondary)
+                            .disabled(itemActionBusy || store.backendBusy)
                     } else {
                         NavigationLink {
                             ScanSellEditor(item: item)
@@ -551,12 +620,27 @@ struct InventoryDetailView: View {
             "Remove this item?", isPresented: $removePrompt, titleVisibility: .visible
         ) {
             Button("Remove item", role: .destructive) {
+                itemActionBusy = true
                 Task {
-                    await store.removeInventoryFood(id)
-                    if food == nil { router.sheet = nil }
+                    if await store.removeInventoryFood(id) {
+                        router.sheet = nil
+                    } else {
+                        itemActionError = store.notice ?? "Couldn't remove this item. Try again."
+                    }
+                    itemActionBusy = false
                 }
             }
-        }.task { await store.loadInventory() }
+        }.alert(
+            "Couldn't save this change",
+            isPresented: Binding(
+                get: { itemActionError != nil }, set: { if !$0 { itemActionError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { itemActionError = nil }
+        } message: {
+            Text(itemActionError ?? "")
+        }
+        .task { await store.loadInventory() }
     }
     private func sensorMetric(_ title: String, value: String, icon: String) -> some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -714,25 +798,76 @@ struct ScanSellEditor: View {
         _allergens = State(initialValue: item.scanAnalysis?.allergens ?? "")
     }
     @State private var price = ""
+    @State private var retailPrice = ""
+    @State private var pounds = ""
     @State private var allergens = ""
     @State private var address = ""
+    @State private var pickupLabel = "Current location · dropped pin"
     @State private var places: [MKMapItem] = []
     @State private var place: MKMapItem?
     @State private var start = Date().addingTimeInterval(3600)
     @State private var end = Date().addingTimeInterval(10800)
-    @State private var confirmations: Set<String> = []
     @State private var publishing = false
     @State private var finding = false
     @State private var useDefaultLocation = true
     @State private var addressMessage: String?
     @State private var pickupLocationRequest = 0
-    private enum Field: Hashable { case price, allergens, address }
+    private enum Field: Hashable { case price, retail, weight, allergens, address }
     @FocusState private var focusedField: Field?
     @State private var error: String?
-    private let safety = [
-        "Stored safely", "Condition is accurate", "No signs of spoilage", "Allergens are declared",
-    ]
     private var cents: Int { Int(((Double(price) ?? 0) * 100).rounded()) }
+    private var canPublish: Bool {
+        guard !publishing, !store.backendBusy, cents > 0, cents <= 100000,
+            !allergens.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            place != nil, end > start
+        else { return false }
+        if !retailPrice.isEmpty {
+            guard let original = Double(retailPrice), original >= Double(cents) / 100,
+                original <= 1000
+            else { return false }
+        }
+        if !pounds.isEmpty {
+            guard let weight = Double(pounds), weight > 0, weight <= 220 else { return false }
+        }
+        return true
+    }
+    private var listingDetails: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Listing details").rescueFont(19, .semibold)
+            HStack {
+                Text("Price")
+                Spacer()
+                Text("$").foregroundStyle(Theme.secondary)
+                TextField("0.00", text: $price).keyboardType(.decimalPad).frame(width: 90)
+                    .accessibilityIdentifier("scan-sell-price").focused(
+                        $focusedField, equals: .price)
+            }
+            Divider()
+            HStack {
+                Text("Original price")
+                Spacer()
+                Text("$").foregroundStyle(Theme.secondary)
+                TextField("Optional", text: $retailPrice).keyboardType(.decimalPad).frame(width: 90)
+                    .focused($focusedField, equals: .retail)
+            }
+            HStack {
+                Text("Food weight (lb)")
+                Spacer()
+                TextField("Optional", text: $pounds).keyboardType(.decimalPad).frame(width: 90)
+                    .focused($focusedField, equals: .weight)
+            }
+            Text(
+                "Use the original price and package weight to show buyers their savings. Leave blank if unknown."
+            )
+            .rescueFont(12).foregroundStyle(Theme.secondary)
+            Divider()
+            TextField("Allergens · enter 'none known' if applicable", text: $allergens)
+                .rescueFont(14).accessibilityIdentifier("scan-sell-allergens")
+                .focused($focusedField, equals: .allergens)
+            Text("Review the suggested details and check allergens on the packaging.")
+                .rescueFont(12).foregroundStyle(Theme.secondary)
+        }.padding(18).card(radius: 24)
+    }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
@@ -751,22 +886,7 @@ struct ScanSellEditor: View {
                     "Your photo and item details are ready. Set your price and pickup window, then review before listing."
                 )
                 .rescueFont(14).foregroundStyle(Theme.secondary)
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("Listing details").rescueFont(19, .semibold)
-                    HStack {
-                        Text("Price")
-                        Spacer()
-                        Text("$").foregroundStyle(Theme.secondary)
-                        TextField("0.00", text: $price).keyboardType(.decimalPad).frame(width: 90)
-                            .accessibilityIdentifier("scan-sell-price").focused($focusedField, equals: .price)
-                    }
-                    Divider()
-                    TextField("Allergens · enter 'none known' if applicable", text: $allergens)
-                        .rescueFont(14).accessibilityIdentifier("scan-sell-allergens")
-                        .focused($focusedField, equals: .allergens)
-                    Text("Review the suggested details and check allergens on the packaging.")
-                        .rescueFont(12).foregroundStyle(Theme.secondary)
-                }.padding(18).card(radius: 24)
+                listingDetails
                 VStack(alignment: .leading, spacing: 14) {
                     Text("Pickup location").rescueFont(19, .semibold)
                     Button {
@@ -775,16 +895,20 @@ struct ScanSellEditor: View {
                         useDefaultLocation = true
                         focusedField = nil
                         pickupLocationRequest += 1
-                        location.useCurrentLocation()
+                        location.useCurrentLocation(refresh: true)
                     } label: {
-                        Label(location.locating && place == nil ? "Finding your location…" : "Use current location",
-                              systemImage: "location.fill")
-                            .rescueFont(14, .semibold).foregroundStyle(Theme.save)
+                        Label(
+                            location.locating && place == nil
+                                ? "Finding your location…" : "Use current location",
+                            systemImage: "location.fill"
+                        )
+                        .rescueFont(14, .semibold).foregroundStyle(Theme.save)
                     }.accessibilityIdentifier("scan-pickup-current-location")
                     TextField("Or search an address", text: $address).rescueFont(15)
                         .accessibilityIdentifier("scan-pickup-address")
                         .focused($focusedField, equals: .address)
                         .onChange(of: address) { _, _ in
+                            guard focusedField == .address else { return }
                             useDefaultLocation = false
                             place = nil
                             places = []
@@ -800,6 +924,7 @@ struct ScanSellEditor: View {
                         Button {
                             useDefaultLocation = false
                             place = candidate
+                            pickupLabel = candidate.placemark.title ?? candidate.name ?? "Selected pickup pin"
                             places = []
                             focusedField = nil
                         } label: {
@@ -811,9 +936,10 @@ struct ScanSellEditor: View {
                                 .background(Theme.soft, in: RoundedRectangle(cornerRadius: 12))
                         }.buttonStyle(.plain).accessibilityIdentifier("pickup-place-\(index)")
                     }
-                    if let place {
+                    if place != nil {
                         Label(
-                            place.placemark.title ?? place.name ?? "Current location", systemImage: "checkmark.circle.fill"
+                            pickupLabel,
+                            systemImage: "checkmark.circle.fill"
                         ).rescueFont(13).foregroundStyle(Theme.save)
                     }
                     Text(
@@ -827,23 +953,7 @@ struct ScanSellEditor: View {
                     DatePicker(
                         "Until", selection: $end, in: Date()...Date().addingTimeInterval(259200))
                 }.padding(18).card(radius: 24)
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("One last check").rescueFont(19, .semibold)
-                    ForEach(safety, id: \.self) { value in
-                        Toggle(
-                            value,
-                            isOn: Binding(
-                                get: { confirmations.contains(value) },
-                                set: {
-                                    if $0 {
-                                        confirmations.insert(value)
-                                    } else {
-                                        confirmations.remove(value)
-                                    }
-                                })
-                        ).rescueFont(14).tint(Theme.save)
-                    }
-                }.padding(18).card(radius: 24)
+
             }.padding(20)
         }.background(Theme.ivory)
             .scrollDismissesKeyboard(.interactively)
@@ -859,37 +969,53 @@ struct ScanSellEditor: View {
                 request.naturalLanguageQuery = query
                 if let selection = location.selection {
                     request.region = MKCoordinateRegion(
-                        center: CLLocationCoordinate2D(latitude: selection.latitude,
-                                                       longitude: selection.longitude),
+                        center: CLLocationCoordinate2D(
+                            latitude: selection.latitude,
+                            longitude: selection.longitude),
                         latitudinalMeters: 50000, longitudinalMeters: 50000)
                 }
                 let search = MKLocalSearch(request: request)
                 do {
                     let response = try await withTaskCancellationHandler {
                         try await search.start()
-                    } onCancel: { search.cancel() }
-                    guard !Task.isCancelled, place == nil else { finding = false; return }
+                    } onCancel: {
+                        search.cancel()
+                    }
+                    guard !Task.isCancelled, place == nil else {
+                        finding = false
+                        return
+                    }
                     places = Array(response.mapItems.prefix(5))
                     addressMessage = places.isEmpty ? "No matches. Try a full street address." : nil
                 } catch {
                     guard !Task.isCancelled else { return }
-                    addressMessage = "Address search is unavailable. Use your location or try again."
+                    addressMessage =
+                        "Address search is unavailable. Use your location or try again."
                 }
                 finding = false
             }
-            .task(id: "\(pickupLocationRequest)-\(useDefaultLocation)-\(location.selection?.latitude ?? 0)-\(location.selection?.longitude ?? 0)") {
-                guard useDefaultLocation, address.isEmpty, let selection = location.selection else { return }
-                let coordinate = CLLocationCoordinate2D(latitude: selection.latitude,
-                                                        longitude: selection.longitude)
+            .task(
+                id:
+                    "\(pickupLocationRequest)-\(useDefaultLocation)-\(location.selection?.latitude ?? 0)-\(location.selection?.longitude ?? 0)"
+            ) {
+                guard useDefaultLocation, address.isEmpty, let selection = location.selection else {
+                    return
+                }
+                let coordinate = CLLocationCoordinate2D(
+                    latitude: selection.latitude,
+                    longitude: selection.longitude)
                 let fallback = MKMapItem(placemark: MKPlacemark(coordinate: coordinate))
-                fallback.name = location.usingGPS ? "Current location" : location.label
+                pickupLabel = location.usingGPS ? "Current location · dropped pin" : location.label
+                fallback.name = pickupLabel
                 place = fallback
                 let geocoder = CLGeocoder()
                 let placemarks = try? await geocoder.reverseGeocodeLocation(
                     CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude))
                 guard !Task.isCancelled, useDefaultLocation, address.isEmpty else { return }
                 if let placemark = placemarks?.first {
-                    place = MKMapItem(placemark: MKPlacemark(placemark: placemark))
+                    pickupLabel = LocationController.streetAddress(placemark) ?? "Current location · dropped pin"
+                    fallback.name = pickupLabel
+                    place = fallback
                 }
             }
             .toolbar {
@@ -909,36 +1035,8 @@ struct ScanSellEditor: View {
             }.navigationTitle("Sell your item").navigationBarTitleDisplayMode(
                 .inline
             )
-            .safeAreaInset(edge: .bottom) {
-                BottomAction {
-                    PrimaryButton(
-                        title: publishing ? "Listing…" : "List on Gusto", symbol: "arrow.up.right",
-                        color: Theme.deep,
-                        disabled: publishing || store.backendBusy || cents <= 0
-                            || allergens.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            || place == nil || end <= start || confirmations.count != 4,
-                        id: "publish-scanned-item"
-                    ) {
-                        guard let place else { return }
-                        publishing = true
-                        Task {
-                            if await store.sellInventoryFood(
-                                item, price: cents, allergens: allergens,
-                                pickupAddress: place.placemark.title ?? place.name ?? "Current location",
-                                latitude: place.placemark.coordinate.latitude,
-                                longitude: place.placemark.coordinate.longitude,
-                                start: start, end: end, attestations: confirmations.count == 4)
-                            {
-                                Haptic.success()
-                                router.sheet = nil
-                            } else {
-                                error = store.notice ?? "Couldn't publish. Try again."
-                            }
-                            publishing = false
-                        }
-                    }
-                }
-            }.alert(
+            .safeAreaInset(edge: .bottom) { publishAction }
+            .alert(
                 "Check your listing",
                 isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })
             ) {
@@ -947,4 +1045,37 @@ struct ScanSellEditor: View {
                 Text(error ?? "")
             }
     }
+    private var publishAction: some View {
+        BottomAction {
+            PrimaryButton(
+                title: publishing ? "Listing…" : "List on Gusto", symbol: "arrow.up.right",
+                color: Theme.deep,
+                disabled: !canPublish,
+                id: "publish-scanned-item"
+            ) {
+                guard let place else { return }
+                publishing = true
+                Task {
+                    if await store.sellInventoryFood(
+                        item, price: cents, allergens: allergens,
+                        pickupAddress: pickupLabel,
+                        latitude: place.placemark.coordinate.latitude,
+                        longitude: place.placemark.coordinate.longitude,
+                        start: start, end: end,
+                        retail: retailPrice.isEmpty
+                            ? nil : Int(((Double(retailPrice) ?? 0) * 100).rounded()),
+                        weightPounds: pounds.isEmpty ? nil : Double(pounds))
+                    {
+                        Haptic.success()
+                        router.sheet = nil
+                    } else {
+                        error = store.notice ?? "Couldn't publish. Try again."
+                    }
+                    publishing = false
+                }
+            }
+        }
+
+    }
+
 }

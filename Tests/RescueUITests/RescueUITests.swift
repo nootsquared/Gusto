@@ -55,7 +55,6 @@ final class RescueUITests: XCTestCase {
         for index in 0..<4 {
             tap("arrive")
             if index == 0 { screenshot("Arrival") }
-            tap("im-here")
             if index == 0 { screenshot("Verify pickup") }
             tap("verify-pickup")
             if index == 0 { screenshot("Demo payment") }
@@ -120,6 +119,22 @@ final class RescueUITests: XCTestCase {
         XCTAssertEqual(field.value as? String, "Search food nearby")
     }
 
+    func testFiltersShowGalleryAndClearingRestoresDiscovery() {
+        app.buttons["Filters"].tap()
+        let category = app.switches["Snacks"]
+        for _ in 0..<6 where !category.isHittable { app.swipeUp() }
+        XCTAssertTrue(category.exists)
+        category.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        tap("apply-filters")
+        XCTAssertTrue(app.otherElements["search-results"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["result-chips"].exists)
+        XCTAssertFalse(app.staticTexts["Picked for you"].exists)
+        XCTAssertFalse(app.staticTexts["Best deals near you"].exists)
+        screenshot("Filtered snacks gallery")
+        tap("cancel-search")
+        XCTAssertTrue(app.staticTexts["Picked for you"].waitForExistence(timeout: 5))
+    }
+
     func testChatComposerAndCorrectPinnedItem() {
         app.tabBars.buttons["Messages"].tap()
         screenshot("Messages")
@@ -160,6 +175,9 @@ final class RescueUITests: XCTestCase {
         screenshot("Bluetooth connection panel")
         tap("close-sheet")
         tap("scan-food")
+        XCTAssertTrue(app.staticTexts["Category"].exists)
+        XCTAssertTrue(app.staticTexts["Condition"].exists)
+        XCTAssertTrue(app.staticTexts["Storage"].exists)
         tap("save-scan")
         XCTAssertTrue(app.staticTexts["Roma Tomato"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Private collection"].exists)
@@ -167,6 +185,7 @@ final class RescueUITests: XCTestCase {
         tap("sell-scanned-item")
         XCTAssertTrue(app.buttons["publish-scanned-item"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["publish-scanned-item"].isEnabled)
+        XCTAssertFalse(app.staticTexts["One last check"].exists)
         screenshot("Scanned item listing review")
         let price = app.textFields["scan-sell-price"]
         price.tap()
@@ -205,9 +224,8 @@ final class RescueUITests: XCTestCase {
         screenshot("Tomorrow filter")
         XCTAssertEqual(tomorrow.value as? String, "1")
         tap("apply-filters")
-        XCTAssertTrue(app.staticTexts["A little further afield?"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["empty-feed-location"].exists)
-        XCTAssertTrue(app.buttons["empty-feed-filters"].exists)
+        XCTAssertTrue(app.staticTexts["No matches nearby"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Adjust filters"].exists)
         XCTAssertFalse(app.staticTexts["Picked for you"].exists)
         screenshot("Discover empty area")
         app.tabBars.buttons["Map"].tap()
@@ -318,7 +336,6 @@ extension RescueUITests {
         tap("start-run", timeout: 20)
         tap("active-run", timeout: 15)
         tap("arrive", timeout: 15)
-        tap("im-here", timeout: 15)
         tap("verify-pickup", timeout: 20)
         tap("pay", timeout: 15)
         XCTAssertTrue(app.staticTexts["Picked up"].waitForExistence(timeout: 20))

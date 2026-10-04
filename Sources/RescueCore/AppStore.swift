@@ -61,6 +61,22 @@ import Observation
     }
     public private(set) var messages: [String: [ChatMessage]] = AppStore.initialMessages
     public private(set) var typingSellers: Set<String> = []
+    public struct IncomingNotification: Identifiable, Sendable {
+        public let id: String
+        public let senderID: String
+        public let title: String
+        public let body: String
+    }
+    public private(set) var incomingNotifications: [IncomingNotification] = []
+    @ObservationIgnored private var notificationAccount = ""
+    @ObservationIgnored private var notificationBaselineLoaded = false
+    @ObservationIgnored private var observedSequences: [String: Int] = [:]
+    public var incomingNotification: IncomingNotification? { incomingNotifications.first }
+    public func dismissIncomingNotification() {
+        if !incomingNotifications.isEmpty { incomingNotifications.removeFirst() }
+    }
+    public var unreadMessageCount: Int { conversations.reduce(0) { $0 + ($1.unreadCount ?? 0) } }
+    @ObservationIgnored private var inventoryRevision = 0
     public var notice: String?
     @ObservationIgnored public let service: DemoService
     @ObservationIgnored private var planGeneration = UUID()
@@ -74,6 +90,13 @@ import Observation
     public var runActive: Bool { phase != .idle && phase != .finished }
     public var cartItems: [Listing] { cart.compactMap { id in catalog.first { $0.id == id } } }
     public var cartTotals: Totals { Totals(cartItems) }
+    public var cartGroups: [PickupStop] {
+        if !isBackend { return PickupPlanner.build(items: cartItems).stops }
+        let groups = Dictionary(grouping: cartItems, by: \.sellerID)
+        return groups.keys.sorted().map { id in
+            PickupStop(seller: seller(id), items: groups[id] ?? [], minute: 0)
+        }
+    }
     public var currentStop: PickupStop? {
         guard let plan, plan.stops.indices.contains(stopIndex) else { return nil }
         return plan.stops[stopIndex]
@@ -132,6 +155,9 @@ import Observation
         counterSellerID = nil
     }
     public func confirmCartAndPlan() async -> Bool {
+        if !runActive, let plan, plan.stops.contains(where: { $0.status == .confirmed }) {
+            return true
+        }
         guard !runActive, !cart.isEmpty else { return false }
         if isBackend {
             let confirmed = await backendWrite("plan", text: pickupPlanSpec())
@@ -154,11 +180,13 @@ import Observation
     public func movePickupStop(_ id: String, by offset: Int) async {
         guard let current = plan, current.stops.allSatisfy({ $0.status == .unconfirmed }),
             let index = current.stops.firstIndex(where: { $0.id == id }),
-            current.stops.indices.contains(index + offset), !backendBusy else { return }
+            current.stops.indices.contains(index + offset), !backendBusy
+        else { return }
         var stops = current.stops
         stops.swapAt(index, index + offset)
         if isBackend, let runID = current.serverID {
-            await backendWrite("reorder_plan", id: runID, text: pickupPlanSpec(order: stops.map(\.id)))
+            await backendWrite(
+                "reorder_plan", id: runID, text: pickupPlanSpec(order: stops.map(\.id)))
         } else {
             let times = current.stops.map(\.minute)
             for i in stops.indices { stops[i].minute = times[i] }
@@ -189,10 +217,25 @@ import Observation
         counterSellerID = nil
         plan = PickupPlanner.build(items: cartItems.filter(\.available), mode: mode)
     }
+    public func cancelPickupRequests() async -> Bool {
+        guard phase == .idle, let existing = plan else { return false }
+        if isBackend {
+            guard let id = existing.serverID else { return false }
+            return await backendWrite("cancel_pickup_requests", id: id)
+        }
+        planGeneration = UUID()
+        coordinating = false
+        counterSellerID = nil
+        let itemIDs = Set(existing.stops.flatMap { $0.items.map(\.id) })
+        cart.removeAll { itemIDs.contains($0) }
+        plan = nil
+        return true
+    }
     public func coordinate() async {
         if isBackend {
             guard !coordinating, let id = plan?.serverID,
-                plan?.stops.contains(where: { $0.status == .unconfirmed }) == true else { return }
+                plan?.stops.contains(where: { $0.status == .unconfirmed }) == true
+            else { return }
             coordinating = true
             defer { coordinating = false }
             await backendWrite("coordinate", id: id)
@@ -270,6 +313,16 @@ import Observation
                 "Running 10 minutes late. See you at \(updated.stops[i].time).", outgoing: true))
         notice = "\(seller(sellerID).firstName) got your new time · route updated"
     }
+    public func markArrival() async {
+        guard phase == .enroute else { return }
+        if isBackend {
+            guard let id = currentStop?.serverID, await backendWrite("arrive", id: id) else { return }
+            await backendWrite("announce", id: id)
+        } else {
+            arrive()
+            await announceArrival()
+        }
+    }
     public func arrive() {
         if isBackend {
             if let id = currentStop?.serverID { launchWrite("arrive", id: id) }
@@ -317,7 +370,7 @@ import Observation
     }
     public func pay() async {
         if isBackend {
-            if let id = currentStop?.serverID { await backendWrite("payment", id: id) }
+            if let id = currentStop?.serverID { await backendWrite("demo_payment", id: id) }
             return
         }
         guard phase == .payment, let stop = currentStop,
@@ -421,10 +474,14 @@ import Observation
             if best[key] == nil { keys.append(key) }
             if let previous = best[key],
                 previous.distance < item.distance
-                    || (previous.distance == item.distance && previous.price <= item.price) { continue }
+                    || (previous.distance == item.distance && previous.price <= item.price)
+            {
+                continue
+            }
             var display = item
             if sample {
-                display.name = item.name.replacingOccurrences(of: #" · package \d+$"#, with: "", options: .regularExpression)
+                display.name = item.name.replacingOccurrences(
+                    of: #" · package \d+$"#, with: "", options: .regularExpression)
             }
             best[key] = display
         }
@@ -432,9 +489,13 @@ import Observation
     }
     public func visibleListings(query text: String? = nil) -> [Listing] {
         if isBackend, let text, !text.isEmpty {
-            return searchResults.filter { $0.sellerID != accountID && filters.accepts($0, sellers: sellers) }
+            return searchResults.filter {
+                $0.sellerID != accountID && filters.accepts($0, sellers: sellers)
+            }
         }
-        var results = catalog.filter { $0.sellerID != accountID && filters.accepts($0, sellers: sellers) }
+        var results = catalog.filter {
+            $0.sellerID != accountID && filters.accepts($0, sellers: sellers)
+        }
         let q = (text ?? query).lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         if q.isEmpty { return results }
         var recognized = false
@@ -574,6 +635,9 @@ extension AppStore {
         monthly = []
         ownListings = []
         conversations = []
+        incomingNotifications = []
+        observedSequences = [:]
+        notificationBaselineLoaded = false
         follows = []
         preferences = nil
         runReceipts = []
@@ -638,6 +702,9 @@ extension AppStore {
         monthly = []
         ownListings = []
         conversations = []
+        incomingNotifications = []
+        observedSequences = [:]
+        notificationBaselineLoaded = false
         follows = []
         preferences = nil
         runReceipts = []
@@ -737,6 +804,40 @@ extension AppStore {
         merge(snapshot.cartListings + snapshot.savedListings + snapshot.ownListings)
         sellers = snapshot.sellers
         ownListings = snapshot.ownListings
+        if notificationAccount != accountID {
+            notificationAccount = accountID
+            observedSequences = [:]
+            notificationBaselineLoaded = false
+            incomingNotifications = []
+        }
+        for conversation in snapshot.conversations {
+            let other =
+                conversation.buyerId == accountID ? conversation.sellerId : conversation.buyerId
+            let sequence = conversation.sequence ?? 0
+            // Baseline old conversations on login; only announce new incoming activity.
+            if let previous = observedSequences[conversation.id], sequence > previous,
+                conversation.lastSenderId != accountID, (conversation.unreadCount ?? 0) > 0,
+                activeChat != other
+            {
+                incomingNotifications.append(
+                    IncomingNotification(
+                        id: "\(conversation.id):\(sequence)", senderID: other,
+                        title: snapshot.sellers.first { $0.id == other }?.name ?? "New message",
+                        body: conversation.summary))
+            } else if observedSequences[conversation.id] == nil && notificationBaselineLoaded,
+                conversation.lastSenderId != accountID, (conversation.unreadCount ?? 0) > 0,
+                activeChat != other
+            {
+                incomingNotifications.append(
+                    IncomingNotification(
+                        id: "\(conversation.id):\(sequence)", senderID: other,
+                        title: snapshot.sellers.first { $0.id == other }?.name ?? "New message",
+                        body: conversation.summary))
+            }
+            observedSequences[conversation.id] = max(
+                observedSequences[conversation.id] ?? 0, sequence)
+        }
+        notificationBaselineLoaded = true
         conversations = snapshot.conversations
         follows = snapshot.follows ?? []
         let latestPurchases = snapshot.receipts.map(\.receipt)
@@ -823,9 +924,12 @@ extension AppStore {
         defer { if generation == sessionGeneration { feedLoading = false } }
         var request = APIRequest("feed", text: "{}")
         if let origin = browseOrigin {
-            guard let spec = try? JSONSerialization.data(withJSONObject: [
-                "latitude": origin.latitude, "longitude": origin.longitude, "distance": 100,
-            ], options: .sortedKeys) else { return }
+            guard
+                let spec = try? JSONSerialization.data(
+                    withJSONObject: [
+                        "latitude": origin.latitude, "longitude": origin.longitude, "distance": 100,
+                    ], options: .sortedKeys)
+            else { return }
             request.text = String(decoding: spec, as: UTF8.self)
         }
         request.value = 50
@@ -1028,7 +1132,7 @@ extension AppStore {
                 name: name, price: price, freshness: freshness, pickup: pickup,
                 confirmations: confirmations)
         }
-        guard let repository, confirmations == 4, !backendBusy else {
+        guard let repository, !backendBusy else {
             notice = "Connect an account before publishing"
             print(
                 "Rescue publish rejected before HTTP:", repository == nil, confirmations,
@@ -1064,8 +1168,7 @@ extension AppStore {
                     timeIntervalSince1970: (Date().timeIntervalSince1970 * 1000 + serverOffset)
                         / 1000))
             let safety = try JSONSerialization.data(withJSONObject: [
-                "safeStorage": true, "accurateCondition": true,
-                "noSpoilage": true, "allergensDeclared": true, "pickupStart": floor(window.start),
+                "pickupStart": floor(window.start),
                 "pickupEnd": floor(window.end),
             ])
             var publish = APIRequest(
@@ -1167,6 +1270,19 @@ extension AppStore {
             let page = try JSONDecoder().decode(BackendMessages.self, from: response.payload)
             guard generation == sessionGeneration else { return }
             applyMessages(page, otherID: otherID)
+            if activeChat == otherID
+                && page.lastSequence > (conversation(with: otherID)?.lastRead ?? 0)
+            {
+                var read = APIRequest("mark_read", resourceID: id, write: true)
+                read.value = page.lastSequence
+                _ = try await repository.request(read)
+                guard generation == sessionGeneration else { return }
+                if let index = conversations.firstIndex(where: { $0.id == id }) {
+                    conversations[index].lastRead = page.lastSequence
+                    conversations[index].unreadCount = 0
+                }
+                incomingNotifications.removeAll { $0.senderID == otherID }
+            }
         } catch {}
     }
     private static func messageUUID(_ id: String) -> UUID {
@@ -1210,13 +1326,13 @@ extension AppStore {
         while !Task.isCancelled && generation == sessionGeneration {
             let wait: Double =
                 online
-                ? (activeChat == nil ? (runActive || plan != nil ? 3 : 10) : 5)
+                ? 3
                 : min(60, pow(2, Double(min(failures + 1, 6))))
             do {
                 try await Task.sleep(
                     nanoseconds: UInt64((wait + Double.random(in: 0...0.25)) * 1_000_000_000))
             } catch { return }
-            await refreshBackend(force: runActive || plan != nil || activeChat != nil || !online)
+            await refreshBackend(force: true)
             guard generation == sessionGeneration else { return }
             if online && Date().timeIntervalSince(lastFeedRefresh) >= 10 {
                 await refreshMarketplace()
@@ -1227,8 +1343,20 @@ extension AppStore {
     }
     public var messageSellers: [Seller] {
         if !isBackend { return sellers }
-        let ids = Set(conversations.map { $0.buyerId == accountID ? $0.sellerId : $0.buyerId })
-        return sellers.filter { ids.contains($0.id) }
+        return conversations.sorted { ($0.lastMessageAt ?? 0) > ($1.lastMessageAt ?? 0) }
+            .compactMap { conversation in
+                let id =
+                    conversation.buyerId == accountID ? conversation.sellerId : conversation.buyerId
+                return sellers.first { $0.id == id }
+            }
+    }
+    public func conversation(with otherID: String) -> BackendConversation? {
+        conversations.first { $0.buyerId == otherID || $0.sellerId == otherID }
+    }
+    public func messagePreview(for otherID: String) -> String {
+        if let latest = messages[otherID]?.last, latest.delivery != nil { return latest.text }
+        return conversation(with: otherID)?.summary ?? messages[otherID]?.last?.text
+            ?? "Start a conversation"
     }
     public var personalizedListings: [Listing] {
         if !isBackend { return ["straw", "avo", "gran", "yog", "eggs"].compactMap(listing) }
@@ -1293,6 +1421,7 @@ extension AppStore {
         guard let repository, !inventoryLoading else { return }
         let generation = sessionGeneration
         inventoryLoading = true
+        let revision = inventoryRevision
         defer { if generation == sessionGeneration { inventoryLoading = false } }
         do {
             let response = try await repository.request(APIRequest("inventory"))
@@ -1302,6 +1431,7 @@ extension AppStore {
             }
             let snapshot = try JSONDecoder().decode(Snapshot.self, from: response.payload)
             guard generation == sessionGeneration else { return }
+            guard revision == inventoryRevision else { return }
             inventory = snapshot.items
             storageReadings = snapshot.readings
         } catch { if generation == sessionGeneration { notice = error.localizedDescription } }
@@ -1315,22 +1445,36 @@ extension AppStore {
     }
     public func trackInventoryFood(_ id: String, deviceID: String) async {
         if !isBackend {
-            if let index = inventory.firstIndex(where: { $0.id == id }) { inventory[index].deviceID = deviceID }
+            if let index = inventory.firstIndex(where: { $0.id == id }) {
+                inventory[index].deviceID = deviceID
+            }
             return
         }
         if await backendWrite("inventory_track", id: id, text: deviceID) { await loadInventory() }
     }
-    public func ingestStorageSample(deviceID: String, temperature: Double, humidity: Double, light: Double) async {
-        guard let repository, temperature.isFinite, humidity.isFinite, light.isFinite else { return }
+    public func ingestStorageSample(
+        deviceID: String, temperature: Double, humidity: Double, light: Double
+    ) async {
+        guard let repository, temperature.isFinite, humidity.isFinite, light.isFinite else {
+            return
+        }
         let generation = sessionGeneration
         for item in inventory where item.deviceID == deviceID {
             guard generation == sessionGeneration else { return }
             do {
-                let data = try JSONSerialization.data(withJSONObject: ["deviceID": deviceID, "temperature": temperature, "humidity": humidity, "light": light, "lightUnit": "raw"])
-                _ = try await repository.request(APIRequest("sensor_reading", resourceID: item.id, text: String(decoding: data, as: UTF8.self), write: true))
+                let data = try JSONSerialization.data(withJSONObject: [
+                    "deviceID": deviceID, "temperature": temperature, "humidity": humidity,
+                    "light": light, "lightUnit": "raw",
+                ])
+                _ = try await repository.request(
+                    APIRequest(
+                        "sensor_reading", resourceID: item.id,
+                        text: String(decoding: data, as: UTF8.self), write: true))
             } catch {
                 // A stale measurement must not be replayed later with a new server timestamp.
-                if generation == sessionGeneration { notice = "Sensor history couldn't sync. Live readings are still on this phone." }
+                if generation == sessionGeneration {
+                    notice = "Sensor history couldn't sync. Live readings are still on this phone."
+                }
                 return
             }
         }
@@ -1363,47 +1507,76 @@ extension AppStore {
             return false
         }
     }
-    public func unlistInventoryFood(_ id: String) async {
-        if !isBackend {
-            guard let index = inventory.firstIndex(where: { $0.id == id }) else { return }
-            let listingID = inventory[index].listingID
-            guard !cart.contains(listingID) else {
-                notice = "This listing has a pickup reservation"
-                return
+    @discardableResult
+    public func unlistInventoryFood(_ id: String) async -> Bool {
+        guard let index = inventory.firstIndex(where: { $0.id == id }) else { return false }
+        let listingID = inventory[index].listingID
+        if isBackend {
+            guard !backendBusy else {
+                notice = "Another change is saving. Try again in a moment."
+                return false
             }
-            catalog.removeAll { $0.id == listingID }
-            ownListings.removeAll { $0.id == listingID }
-            inventory[index].listingID = ""
-            return
+            guard await backendWrite("inventory_unlist", id: id) else {
+                if notice == "unavailable" {
+                    notice =
+                        "This item has an active pickup or has already been sold. Resolve the pickup before removing it."
+                }
+                return false
+            }
+        } else if cart.contains(listingID) {
+            notice = "This listing has a pickup reservation"
+            return false
         }
-        if await backendWrite("inventory_unlist", id: id) { await loadInventory() }
+        inventoryRevision += 1
+        // Apply successful writes immediately, even if an older inventory read is still in flight.
+        if let current = inventory.firstIndex(where: { $0.id == id }) {
+            inventory[current].listingID = ""
+        }
+        catalog.removeAll { $0.id == listingID }
+        ownListings.removeAll { $0.id == listingID }
+        return true
     }
-    public func removeInventoryFood(_ id: String) async {
-        if !isBackend {
-            await unlistInventoryFood(id)
-            guard let item = inventory.first(where: { $0.id == id }), item.listingID.isEmpty else {
-                return
+    @discardableResult
+    public func removeInventoryFood(_ id: String) async -> Bool {
+        guard let item = inventory.first(where: { $0.id == id }) else { return false }
+        if isBackend {
+            guard !backendBusy else {
+                notice = "Another change is saving. Try again in a moment."
+                return false
             }
-            inventory.removeAll { $0.id == id }
-            return
+            guard await backendWrite("inventory_remove", id: id) else {
+                if notice == "unavailable" {
+                    notice =
+                        "This item has an active pickup or has already been sold. Resolve the pickup before removing it."
+                }
+                return false
+            }
+        } else if !item.listingID.isEmpty {
+            guard await unlistInventoryFood(id) else { return false }
         }
-        if await backendWrite("inventory_remove", id: id) { await loadInventory() }
+        inventoryRevision += 1
+        inventory.removeAll { $0.id == id }
+        catalog.removeAll { $0.id == item.listingID }
+        ownListings.removeAll { $0.id == item.listingID }
+        return true
     }
     public func sellInventoryFood(
         _ item: InventoryFood, price: Int, allergens: String,
         pickupAddress: String, latitude: Double, longitude: Double,
-        start: Date, end: Date, attestations: Bool
+        start: Date, end: Date, retail: Int? = nil,
+        weightPounds: Double? = nil
     ) async -> Bool {
-        guard attestations, price > 0, end > start, end > Date() else { return false }
+        guard price > 0, end > start, end > Date() else { return false }
         if !isBackend {
             guard !item.isListed, let index = inventory.firstIndex(where: { $0.id == item.id })
             else { return false }
             let id = "inventory-\(item.id)"
             var listing = Listing(
-                id: id, name: item.title, price: price, retail: price,
+                id: id, name: item.title, price: price, retail: retail ?? price,
                 distance: 0, freshness: item.condition == "Use soon" ? .useSoon : .good,
                 pickup: "Scheduled pickup", updated: "just now", stale: false,
-                sellerID: "nina", category: item.category, quantity: item.quantity, weight: 0,
+                sellerID: "nina", category: item.category, quantity: item.quantity,
+                weight: weightPounds ?? 0,
                 opened: false, storage: item.storage, allergens: allergens,
                 purchased: "Seller supplied",
                 receipt: false, vegetarian: true, prepared: false)
@@ -1419,12 +1592,12 @@ extension AppStore {
         defer { if generation == sessionGeneration { backendBusy = false } }
         do {
             let data = try JSONSerialization.data(withJSONObject: [
-                "price": price, "allergens": allergens, "pickupAddress": pickupAddress,
+                "price": price, "retail": retail ?? price,
+                "grams": Int(((weightPounds ?? 0) * 453.592).rounded()), "allergens": allergens,
+                "pickupAddress": pickupAddress,
                 "latitude": latitude, "longitude": longitude,
                 "start": floor(start.timeIntervalSince1970 * 1000),
                 "end": floor(end.timeIntervalSince1970 * 1000),
-                "safeStorage": attestations, "accurateCondition": attestations,
-                "noSpoilage": attestations, "allergensDeclared": attestations,
             ])
             _ = try await repository.request(
                 APIRequest(

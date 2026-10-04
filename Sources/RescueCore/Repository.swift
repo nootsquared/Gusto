@@ -39,10 +39,16 @@ public enum RepositoryError: Error, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .server(let code):
-            if code == "gemini_billing_required" { return "Gemini needs credits added to the project's billing account" }
-            if code == "gemini_not_configured" { return "Gemini hasn't been configured on this server yet" }
+            if code == "gemini_billing_required" {
+                return "Gemini needs credits added to the project's billing account"
+            }
+            if code == "gemini_not_configured" {
+                return "Gemini hasn't been configured on this server yet"
+            }
             if code == "gemini_unavailable" { return "Gemini is unavailable right now" }
-            if code == "invalid_analysis" { return "Gemini couldn't confidently read the food details" }
+            if code == "invalid_analysis" {
+                return "Gemini couldn't confidently read the food details"
+            }
             return code.replacingOccurrences(of: "_", with: " ")
         case .offline: return "Offline. This action needs a server response."
         case .invalidResponse: return "The server returned an unsupported response."
@@ -93,6 +99,11 @@ public struct BackendConversation: Codable, Sendable {
     public let buyerId: String
     public let sellerId: String
     public let summary: String
+    public var sequence: Int? = nil
+    public var lastRead: Int? = nil
+    public var unreadCount: Int? = nil
+    public var lastSenderId: String? = nil
+    public var lastMessageAt: Double? = nil
 }
 public struct BackendReceipt: Codable, Sendable {
     public let id: String
