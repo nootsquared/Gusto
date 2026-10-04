@@ -3,44 +3,163 @@ import SwiftUI
 struct MessagesView: View {
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
+
     var body: some View {
-        List {
-            Text("Coordinate your pickups here").rescueFont(15).foregroundStyle(Theme.secondary)
-                .listRowSeparator(.hidden)
-            ForEach(store.messageSellers) { seller in
-                Button {
-                    router.chat(seller.id)
-                } label: {
-                    HStack(spacing: 12) {
-                        Avatar(seller: seller, size: 52)
-                            .overlay(alignment: .bottomTrailing) {
-                                if let item = store.pinnedListing(for: seller.id) {
-                                    FoodPhoto(name: item.image).frame(width: 24, height: 24)
-                                        .clipShape(RoundedRectangle(cornerRadius: 7)).overlay(
-                                            RoundedRectangle(cornerRadius: 7).stroke(
-                                                Theme.ivory, lineWidth: 2)
-                                        ).offset(x: 3, y: 3)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Messages").rescueFont(32, .bold).tracking(-1)
+                    Text("Pickup chats & updates").rescueFont(15).foregroundStyle(Theme.secondary)
+                }.padding(.top, 16)
+
+                VStack(spacing: 0) {
+                    NavigationLink {
+                        GustoWelcomeMessage()
+                    } label: {
+                        HStack(alignment: .top, spacing: 14) {
+                            GustoMessageAvatar()
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 6) {
+                                    Text("Gusto").rescueFont(17, .semibold)
+                                    Image(systemName: "checkmark.seal.fill")
+                                        .font(.system(size: 13)).foregroundStyle(Theme.save)
+                                    Spacer()
+                                    Text("WELCOME").rescueFont(10, .semibold)
+                                        .tracking(1).foregroundStyle(Theme.save)
                                 }
+                                Text("Hi! Welcome to Gusto 👋").rescueFont(15, .medium)
+                                Text("Good food nearby. Here's how to get started.")
+                                    .rescueFont(13).foregroundStyle(Theme.secondary)
+                                    .lineLimit(2)
                             }
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text(seller.name).rescueFont(16, .semibold)
-                                Spacer()
-                                Text("Today").rescueFont(12).foregroundStyle(Theme.muted)
-                            }
-                            Text(store.pinnedListing(for: seller.id)?.name ?? "Pickup coordination")
-                                .rescueFont(13).foregroundStyle(Theme.muted)
+                            Image(systemName: "chevron.right").font(
+                                .system(size: 12, weight: .semibold)
+                            )
+                            .foregroundStyle(Theme.muted).padding(.top, 23)
+                        }.padding(18).foregroundStyle(Theme.ink)
+                    }.buttonStyle(.plain).accessibilityIdentifier("gusto-welcome")
+
+                    ForEach(store.messageSellers) { seller in
+                        Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 84)
+                        Button {
+                            router.chat(seller.id)
+                        } label: {
+                            HStack(spacing: 14) {
+                                Avatar(seller: seller, size: 52)
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(seller.name).rescueFont(16, .semibold)
+                                    if let item = store.pinnedListing(for: seller.id) {
+                                        Text(item.name).rescueFont(12).foregroundStyle(Theme.save)
+                                            .lineLimit(1)
+                                    }
+                                    Text(
+                                        store.messages[seller.id]?.last?.text
+                                            ?? "Start a conversation"
+                                    )
+                                    .rescueFont(14).foregroundStyle(Theme.secondary).lineLimit(2)
+                                }.frame(maxWidth: .infinity, alignment: .leading)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(
+                                        Theme.muted)
+                            }.padding(18).foregroundStyle(Theme.ink)
+                        }.buttonStyle(.plain).accessibilityIdentifier("chat-\(seller.id)")
+                    }
+                }.card(radius: 24)
+
+                if store.messageSellers.isEmpty {
+                    VStack(spacing: 14) {
+                        Image(systemName: "bubble.left.and.bubble.right")
+                            .font(.system(size: 30, weight: .light)).foregroundStyle(Theme.sage)
+                            .frame(width: 72, height: 72).background(Theme.soft, in: Circle())
+                        VStack(spacing: 7) {
+                            Text("Ready when you are").rescueFont(22, .semibold)
                             Text(
-                                store.messages[seller.id]?.last?.text
-                                    ?? (store.isBackend
-                                        ? "Start a conversation" : "Hi! Confirmed for your pickup.")
-                            ).rescueFont(15).foregroundStyle(Theme.secondary).lineLimit(1)
+                                "Once you contact a seller, your pickup conversation will appear here."
+                            )
+                            .rescueFont(15).foregroundStyle(Theme.secondary)
+                            .multilineTextAlignment(.center).fixedSize(
+                                horizontal: false, vertical: true)
                         }
-                    }.padding(.vertical, 6).foregroundStyle(Theme.ink)
-                }.listRowBackground(Theme.ivory).accessibilityIdentifier("chat-\(seller.id)")
+                        Button {
+                            Haptic.tap()
+                            withAnimation(Theme.spring) { router.tab = .discover }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Text("Find food nearby").rescueFont(14, .semibold)
+                                Image(systemName: "arrow.right").font(
+                                    .system(size: 13, weight: .semibold))
+                            }.foregroundStyle(Theme.save).padding(.horizontal, 20).padding(
+                                .vertical, 13
+                            )
+                            .background(Theme.soft, in: Capsule())
+                        }.buttonStyle(.plain).accessibilityIdentifier("messages-browse")
+                    }.frame(maxWidth: .infinity).padding(.horizontal, 24).padding(.top, 32)
+                }
+            }.padding(.horizontal, 20).padding(.bottom, 32)
+        }.background(Theme.ivory).toolbar(.hidden, for: .navigationBar)
+    }
+}
+
+private struct GustoMessageAvatar: View {
+    var body: some View {
+        Image(systemName: "leaf.fill")
+            .font(.system(size: 24, weight: .medium)).foregroundStyle(Theme.paper)
+            .frame(width: 52, height: 52)
+            .background(
+                LinearGradient(
+                    colors: [Theme.save, Theme.deep], startPoint: .topLeading,
+                    endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 18))
+    }
+}
+
+private struct GustoWelcomeMessage: View {
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                HStack(spacing: 12) {
+                    GustoMessageAvatar()
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("A little hello from Gusto").rescueFont(17, .semibold)
+                        Text("Platform message").rescueFont(12).foregroundStyle(Theme.secondary)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Hi! Welcome to Gusto 👋").rescueFont(26, .bold).tracking(-0.6)
+                    Text(
+                        "Find something good nearby, save it to your cart, and pick it up from a local seller."
+                    )
+                    .rescueFont(16).foregroundStyle(Theme.secondary).lineSpacing(4)
+                    Rectangle().fill(Theme.line).frame(height: 1)
+                    welcomeStep(
+                        "1", title: "Find your favorites",
+                        detail: "Choose your location and browse food around you.")
+                    welcomeStep(
+                        "2", title: "Save now, decide later",
+                        detail: "Adding to your cart doesn't reserve anything or message sellers.")
+                    welcomeStep(
+                        "3", title: "Make pickup plans",
+                        detail:
+                            "Confirm from your cart when you're ready. Then contact sellers to arrange pickup."
+                    )
+                    Text("Your seller conversations will live right here. Happy finding!")
+                        .rescueFont(15).foregroundStyle(Theme.sage).lineSpacing(3)
+                }.padding(24).card(radius: 26)
+                Label("A welcome note from Gusto", systemImage: "info.circle")
+                    .rescueFont(12).foregroundStyle(Theme.muted)
+            }.padding(20)
+        }.background(Theme.ivory).navigationTitle("Gusto")
+            .navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar)
+            .accessibilityIdentifier("welcome-message")
+    }
+    private func welcomeStep(_ number: String, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(number).rescueFont(12, .semibold).foregroundStyle(Theme.save)
+                .frame(width: 28, height: 28).background(Theme.soft, in: Circle())
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title).rescueFont(16, .semibold)
+                Text(detail).rescueFont(14).foregroundStyle(Theme.secondary).lineSpacing(3)
             }
-        }.listStyle(.plain).scrollContentBackground(.hidden).background(Theme.ivory)
-            .navigationTitle("Messages")
+        }
     }
 }
 
@@ -73,11 +192,18 @@ struct ChatView: View {
                 ScrollView {
                     LazyVStack(spacing: 8) {
                         Text(
-                            store.isBackend
-                                ? "Persistent local demo conversation" : "Today · mock conversation"
+                            "Today"
                         ).rescueFont(12).foregroundStyle(
                             Theme.muted
                         ).padding(.vertical, 8)
+                        if (store.messages[sellerID] ?? []).isEmpty {
+                            VStack(spacing: 8) {
+                                Text("Say hello to \(seller.firstName)").rescueFont(20, .semibold)
+                                Text("Ask about the food or arrange your pickup here.")
+                                    .rescueFont(14).foregroundStyle(Theme.secondary)
+                                    .multilineTextAlignment(.center)
+                            }.frame(maxWidth: .infinity).padding(.vertical, 36)
+                        }
                         ForEach(
                             store.messages[sellerID] ?? []
                         ) { message in
@@ -88,7 +214,7 @@ struct ChatView: View {
                                         message.outgoing ? Theme.paper : Theme.ink
                                     ).padding(.horizontal, 14).padding(.vertical, 10)
                                     .background(
-                                        message.outgoing ? Theme.ink : Theme.paper,
+                                        message.outgoing ? Theme.deep : Theme.paper,
                                         in: UnevenRoundedRectangle(
                                             topLeadingRadius: 20,
                                             bottomLeadingRadius: message.outgoing ? 20 : 6,

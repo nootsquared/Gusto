@@ -51,7 +51,7 @@ struct RootView: View {
             NavigationStack { MessagesView() }.tabItem {
                 Label("Messages", systemImage: "bubble.left.and.bubble.right").environment(
                     \.symbolVariants, .none)
-            }.badge(1).tag(AppTab.messages)
+            }.tag(AppTab.messages)
             NavigationStack { ProfileView() }.tabItem {
                 Label {
                     Text("You")
