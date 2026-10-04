@@ -5,13 +5,16 @@ import SwiftUI
 struct ProfileView: View {
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
+    private var liveListingCount: Int {
+        store.ownListings.filter(\.available).count + (store.isBackend ? 0 : store.catalog.filter { $0.id == "my-granola" }.count)
+    }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 HStack(spacing: 16) {
                     FoodPhoto(name: "profile").frame(width: 72, height: 72).clipShape(Circle())
                     VStack(alignment: .leading, spacing: 6) {
-                        Label(store.profileName, systemImage: "person.fill").rescueFont(26, .bold)
+                        Text(store.profileName).rescueFont(26, .bold)
                         Text(
                             store.isBackend
                                 ? "Local demo account · \(store.receipts.count) completed purchases"
@@ -32,7 +35,7 @@ struct ProfileView: View {
                         Image(systemName: "gift")
                         VStack(alignment: .leading, spacing: 3) {
                             Text("Give 10%, get 10%").rescueFont(15, .semibold)
-                            Text("Invite a friend to their first rescue").rescueFont(13)
+                            Text("Invite a friend to their first pickup").rescueFont(13)
                         }
                         Spacer()
                         Image(systemName: "chevron.right")
@@ -43,7 +46,7 @@ struct ProfileView: View {
                     profileRow(
                         "My Listings", "tag", .listings,
                         detail:
-                            "\((store.isBackend ? store.ownListings.filter(\.available).count : store.catalog.filter { $0.id == "my-granola" }.count)) live"
+                            "\(liveListingCount) live"
                     )
                     profileRow("Purchases & Sales", "receipt", .purchases)
                     profileRow("Saved", "heart", .saved, detail: "\(store.savedIDs.count)")
@@ -57,8 +60,8 @@ struct ProfileView: View {
                     profileRow("Settings", "gearshape", .settings, last: true)
                 }.padding(.horizontal, 16).card(radius: 20)
             }.padding(20)
-        }.background(Theme.ivory).foregroundStyle(Theme.ink).navigationTitle("You")
-            .navigationBarTitleDisplayMode(.inline)
+        }.background(Theme.ivory).foregroundStyle(Theme.ink)
+            .toolbar(.hidden, for: .navigationBar)
     }
     private func profileRow(
         _ title: String, _ icon: String, _ panel: ProfilePanel, detail: String = "",
@@ -137,7 +140,7 @@ struct MonthlyChart: View {
                         : (compact ? Theme.paper.opacity(0.2) : Theme.soft)
                 ).cornerRadius(compact ? 4 : 8)
         }.chartYAxis(.hidden).chartXAxis(compact ? .hidden : .automatic).accessibilityLabel(
-            "Estimated food rescued by month"
+            "Estimated food saved by month"
         ).accessibilityValue(
             months.map { "\($0.0): \(String(format: "%.1f", $0.1)) pounds" }.joined(separator: ", ")
         )
@@ -150,7 +153,7 @@ struct ProfilePanelView: View {
     @AppStorage("useLiveMap") private var useLiveMap = false
     @AppStorage("smartAlerts") private var smartAlerts = true
     let panel: ProfilePanel
-    private let invite = "rescue-demo://invite/priya"
+    private let invite = "gusto-demo://invite/priya"
     var body: some View {
         Group {
             switch panel {
@@ -164,13 +167,13 @@ struct ProfilePanelView: View {
                         HStack {
                             MetricCard(
                                 value: Money.text(store.impact.saved), label: "saved")
-                            MetricCard(value: "\(store.receipts.count)", label: "rescues")
+                            MetricCard(value: "\(store.receipts.count)", label: "pickups")
                             MetricCard(value: "\(store.impact.count)", label: "items")
                         }
                         Text("By month").rescueFont(20, .semibold)
                         MonthlyChart(extra: store.impact.pounds).frame(height: 190)
                         Text(
-                            "Mostly breakfast and produce — you're best at rescuing things on your way home. Weights are seller-reported estimates."
+                            "Your past pickups, grouped by month. Weights are seller-reported estimates."
                         ).rescueFont(14).foregroundStyle(Theme.secondary).padding(16).background(
                             Theme.bone, in: RoundedRectangle(cornerRadius: 16))
                     }.padding(20)
@@ -179,7 +182,7 @@ struct ProfilePanelView: View {
                 ScrollView {
                     VStack(spacing: 20) {
                         Text("Give 10%, get 10%").rescueFont(28, .bold)
-                        Text("Off your next rescue — for both of you.").rescueFont(15)
+                        Text("Off your next purchase — for both of you.").rescueFont(15)
                             .foregroundStyle(Theme.secondary)
                         if let qr = QRCode.image(invite) {
                             Image(uiImage: qr).interpolation(.none).resizable().scaledToFit().frame(
@@ -200,7 +203,7 @@ struct ProfilePanelView: View {
                                 maxWidth: .infinity, alignment: .leading
                             ).padding(20).background(
                                 Theme.deep, in: RoundedRectangle(cornerRadius: 24))
-                        ShareLink(item: "Join my Rescue demo: \(invite)") {
+                        ShareLink(item: "Join my Gusto demo: \(invite)") {
                             Label("Share", systemImage: "square.and.arrow.up").frame(
                                 maxWidth: .infinity
                             ).padding(16)
@@ -264,13 +267,13 @@ struct ProfilePanelView: View {
             case .listings:
                 let own =
                     store.isBackend
-                    ? store.ownListings : store.catalog.filter { $0.id == "my-granola" }
+                    ? store.ownListings : store.ownListings + store.catalog.filter { $0.id == "my-granola" }
                 if own.isEmpty {
                     VStack {
                         EmptyState(
-                            title: "No listings yet", message: "Try the Sell tab's mock photo scan."
+                            title: "No listings yet", message: "Scan an item, then choose Sell this item."
                         )
-                        Button("List food") {
+                        Button("Scan food") {
                             router.sheet = nil
                             router.tab = .scan
                         }.buttonStyle(.borderedProminent).padding()
@@ -285,7 +288,7 @@ struct ProfilePanelView: View {
                 if history.isEmpty {
                     EmptyState(
                         title: "No pickups yet",
-                        message: "Complete a rescue run to see your receipts.", symbol: "receipt")
+                        message: "Complete a pickup to see your receipts.", symbol: "receipt")
                 } else {
                     List {
                         ForEach(history.indices, id: \.self) { index in
@@ -342,7 +345,7 @@ struct ProfilePanelView: View {
             case .settings:
                 Form {
                     Section("Demo") {
-                        Toggle("Use live MapKit basemap", isOn: $useLiveMap)
+                        Toggle("Live maps for pickup routes", isOn: $useLiveMap)
                         Text(
                             "Off uses the source design's offline map. On loads Apple's map tiles; seller coordinates remain fictional."
                         ).font(.footnote)
@@ -397,7 +400,7 @@ struct ProfilePanelView: View {
                         }
                     }
                     Section("About") {
-                        Text("Rescue · Native iPhone demo")
+                        Text("Gusto · Native iPhone demo")
                         Text("SwiftUI · iOS 17+")
                         Text(
                             store.isBackend
