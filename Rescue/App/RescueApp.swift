@@ -5,7 +5,11 @@ import SwiftUI
     @State private var store = AppStore(
         service: DemoService(
             delayNanoseconds: ProcessInfo.processInfo.arguments.contains("--uitesting")
-                ? 50_000_000 : 700_000_000))
+                ? 50_000_000 : 700_000_000),
+        fixtureMode: ProcessInfo.processInfo.arguments.contains("--fixture")
+            || (ProcessInfo.processInfo.arguments.contains("--uitesting")
+                && !ProcessInfo.processInfo.arguments.contains("--backend"))
+    )
     @State private var router = AppRouter()
     var body: some Scene {
         WindowGroup {
@@ -19,6 +23,7 @@ struct RootView: View {
     @Environment(AppRouter.self) private var router
     @AppStorage("hasOnboarded") private var hasOnboarded = false
     @State private var showFinale = false
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showOnboarding = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -56,6 +61,31 @@ struct RootView: View {
                 }
             }.tag(
                 AppTab.you)
+        }.task {
+            let args = ProcessInfo.processInfo.arguments
+            if !args.contains("--fixture")
+                && (!args.contains("--uitesting") || args.contains("--backend"))
+            {
+                store.enterBackendMode()
+                do {
+                    if SessionController.shared.current == nil {
+                        try await SessionController.shared.loadDemoAccounts()
+                    }
+                    #if DEBUG
+                        if let index = args.firstIndex(of: "--account"),
+                            args.indices.contains(index + 1)
+                        {
+                            try SessionController.shared.select(args[index + 1])
+                        }
+                    #endif
+                    await store.connect(try SessionController.shared.repository())
+                } catch {
+                    NSLog("Rescue session setup failed: %@", error.localizedDescription)
+                    store.notice = error.localizedDescription
+                }
+            }
+        }.task(id: "\(scenePhase)-\(store.isBackend)-\(store.accountID)") {
+            if scenePhase == .active { await store.pollBackend() }
         }.tint(Theme.ink).background(Theme.ivory.ignoresSafeArea())
             .toolbarBackground(Theme.paper, for: .tabBar).toolbarBackground(.visible, for: .tabBar)
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -111,7 +141,11 @@ struct RootView: View {
                 showOnboarding =
                     !hasOnboarded && !ProcessInfo.processInfo.arguments.contains("--uitesting")
             }
-            .onChange(of: store.phase) { _, phase in
+            .onChange(of: store.phase) { previous, phase in
+                if store.isBackend && previous == .idle && phase == .enroute {
+                    router.tab = .map
+                    router.sheet = nil
+                }
                 if phase == .finished {
                     router.sheet = nil
                     Task {

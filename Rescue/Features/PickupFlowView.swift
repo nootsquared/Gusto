@@ -234,6 +234,12 @@ struct PickupFlowView: View {
         if let stop = store.currentStop {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    if store.isBackend, let location = stop.privateLocation,
+                        location.cacheUntil > Date().timeIntervalSince1970 * 1000
+                    {
+                        Text(location.address).rescueFont(16, .semibold)
+                        Text(location.instructions).rescueFont(14).foregroundStyle(Theme.secondary)
+                    }
                     switch store.phase {
                     case .arrived, .waiting:
                         Label(
@@ -244,7 +250,7 @@ struct PickupFlowView: View {
                         SellerRow(seller: stop.seller)
                         ForEach(stop.items) { item in HandoffItem(item: item) }
                         Button {
-                            router.chat(stop.id)
+                            router.chat(stop.seller.id)
                         } label: {
                             Label("Message \(stop.seller.firstName)", systemImage: "bubble.left")
                                 .rescueFont(16, .semibold)
@@ -307,6 +313,12 @@ struct PickupFlowView: View {
                 }.padding(20)
             }.safeAreaInset(edge: .bottom) {
                 BottomAction {
+                    if store.isBackend, let location = stop.privateLocation,
+                        location.cacheUntil > Date().timeIntervalSince1970 * 1000
+                    {
+                        Text(location.address).rescueFont(16, .semibold)
+                        Text(location.instructions).rescueFont(14).foregroundStyle(Theme.secondary)
+                    }
                     switch store.phase {
                     case .arrived:
                         PrimaryButton(title: "I'm Here", id: "im-here") {

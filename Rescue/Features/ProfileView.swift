@@ -11,8 +11,12 @@ struct ProfileView: View {
                 HStack(spacing: 16) {
                     FoodPhoto(name: "profile").frame(width: 72, height: 72).clipShape(Circle())
                     VStack(alignment: .leading, spacing: 6) {
-                        Label("Priya S.", systemImage: "checkmark.seal.fill").rescueFont(26, .bold)
-                        Text("4.9 · 24 pickups · Student verified").rescueFont(13).foregroundStyle(
+                        Label(store.profileName, systemImage: "person.fill").rescueFont(26, .bold)
+                        Text(
+                            store.isBackend
+                                ? "Local demo account · \(store.receipts.count) completed purchases"
+                                : "4.9 · 24 pickups · Student verified"
+                        ).rescueFont(13).foregroundStyle(
                             Theme.secondary)
                     }
                 }
@@ -38,13 +42,17 @@ struct ProfileView: View {
                 VStack(spacing: 0) {
                     profileRow(
                         "My Listings", "tag", .listings,
-                        detail: "\(store.catalog.filter { $0.id == "my-granola" }.count) live")
+                        detail:
+                            "\((store.isBackend ? store.ownListings.filter(\.available).count : store.catalog.filter { $0.id == "my-granola" }.count)) live"
+                    )
                     profileRow("Purchases & Sales", "receipt", .purchases)
                     profileRow("Saved", "heart", .saved, detail: "\(store.savedIDs.count)")
-                    profileRow("Alerts & follows", "bell", .alerts, detail: "5")
-                    profileRow("Payment", "creditcard", .payment, detail: "Visa •• 4021")
                     profileRow(
-                        "Verification", "checkmark.shield", .verification, detail: "ID · Student")
+                        "Alerts & follows", "bell", .alerts,
+                        detail: store.isBackend ? "Preferences" : "5")
+                    profileRow("Payment", "creditcard", .payment, detail: "Demo only")
+                    profileRow(
+                        "Verification", "checkmark.shield", .verification, detail: "Unavailable")
                     profileRow("Referrals", "gift", .referrals, detail: "Give 10%")
                     profileRow("Settings", "gearshape", .settings, last: true)
                 }.padding(.horizontal, 16).card(radius: 20)
@@ -82,14 +90,14 @@ struct ImpactHero: View {
                 Spacer()
                 Image(systemName: "chevron.right")
             }.foregroundStyle(Theme.paper.opacity(0.7))
-            Text("\(31.4 + totals.pounds, specifier: "%.1f") lb").rescueFont(46, .bold)
+            Text("\(totals.pounds, specifier: "%.1f") lb").rescueFont(46, .bold)
                 .monospacedDigit()
             Text("food kept in use").rescueFont(15).foregroundStyle(Theme.paper.opacity(0.7))
             MonthlyChart(extra: totals.pounds, compact: true).frame(height: 42).padding(.top, 8)
             Divider().overlay(Theme.paper.opacity(0.15)).padding(.vertical, 6)
             HStack {
                 VStack(alignment: .leading) {
-                    Text(Money.text(14600 + totals.saved)).rescueFont(20, .semibold)
+                    Text(Money.text(totals.saved)).rescueFont(20, .semibold)
                     Text("saved").rescueFont(13).foregroundStyle(Theme.paper.opacity(0.6))
                 }
                 Spacer()
@@ -99,7 +107,7 @@ struct ImpactHero: View {
                 }
                 Spacer()
                 VStack(alignment: .leading) {
-                    Text("\(46 + totals.count)").rescueFont(20, .semibold)
+                    Text("\(totals.count)").rescueFont(20, .semibold)
                     Text("items").rescueFont(13).foregroundStyle(Theme.paper.opacity(0.6))
                 }
             }.monospacedDigit()
@@ -109,13 +117,16 @@ struct ImpactHero: View {
 }
 
 struct MonthlyChart: View {
+    @Environment(AppStore.self) private var store
     let extra: Double
     var compact = false
     private var months: [(String, Double)] {
-        [
-            ("May", 3.1), ("Jun", 4.6), ("Jul", 3.8), ("Aug", 6.2), ("Sep", 8.9),
-            ("Oct", 4.8 + extra),
-        ]
+        if store.isBackend {
+            return store.monthly.sorted { $0.month < $1.month }.map {
+                ($0.month, Double($0.grams) / 453.59237)
+            }
+        }
+        return [("This demo", extra)]
     }
     var body: some View {
         Chart(Array(months.enumerated()), id: \.offset) { _, month in
@@ -147,14 +158,14 @@ struct ProfilePanelView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         Text("SINCE MAY").rescueFont(13, .semibold).foregroundStyle(Theme.sage)
-                        Text("\(31.4 + store.impact.pounds, specifier: "%.1f") lb").rescueFont(
+                        Text("\(store.impact.pounds, specifier: "%.1f") lb").rescueFont(
                             56, .bold)
                         Text("food kept in use").rescueFont(17).foregroundStyle(Theme.secondary)
                         HStack {
                             MetricCard(
-                                value: Money.text(14600 + store.impact.saved), label: "saved")
-                            MetricCard(value: "\(12 + store.receipts.count)", label: "rescues")
-                            MetricCard(value: "\(46 + store.impact.count)", label: "items")
+                                value: Money.text(store.impact.saved), label: "saved")
+                            MetricCard(value: "\(store.receipts.count)", label: "rescues")
+                            MetricCard(value: "\(store.impact.count)", label: "items")
                         }
                         Text("By month").rescueFont(20, .semibold)
                         MonthlyChart(extra: store.impact.pounds).frame(height: 190)
@@ -184,7 +195,7 @@ struct ProfilePanelView: View {
                         } label: {
                             Label("Copy invite", systemImage: "doc.on.doc")
                         }.buttonStyle(.bordered).buttonBorderShape(.capsule)
-                        Text("I kept \(Int(31.4 + store.impact.pounds)) lb of food in use.")
+                        Text("I kept \(Int(store.impact.pounds)) lb of food in use.")
                             .rescueFont(24, .semibold).foregroundStyle(Theme.paper).frame(
                                 maxWidth: .infinity, alignment: .leading
                             ).padding(20).background(
@@ -199,20 +210,51 @@ struct ProfilePanelView: View {
             case .alerts:
                 Form {
                     Section("Alerts") {
-                        Toggle("Smart alerts", isOn: $smartAlerts)
-                        ForEach(
-                            [
-                                "Strawberries for $2.50 were listed nearby.",
-                                "Your pickup route starts in 20 minutes.",
-                                "Nina reconfirmed freshness.", "An item you saved dropped to $3.",
-                            ], id: \.self
-                        ) { Text($0).rescueFont(15) }
+                        Toggle(
+                            "Smart alerts",
+                            isOn: store.isBackend
+                                ? Binding(
+                                    get: { store.preferences?.smartAlerts ?? false },
+                                    set: { store.updateSmartAlerts($0) }) : $smartAlerts)
+                        if store.isBackend {
+                            Text(
+                                "Push delivery is not connected. Preferences and follows are saved to this account."
+                            ).font(.footnote)
+                        } else {
+                            ForEach(
+                                [
+                                    "Strawberries for $2.50 were listed nearby.",
+                                    "Your pickup route starts in 20 minutes.",
+                                    "Nina reconfirmed freshness.",
+                                    "An item you saved dropped to $3.",
+                                ], id: \.self
+                            ) { Text($0).rescueFont(15) }
+                        }
                     }
                     Section("Following") {
-                        ForEach(
-                            ["Strawberries", "Breakfast", "Maya R.", "Under $3", "Bakery"],
-                            id: \.self
-                        ) { Text($0) }
+                        if store.isBackend {
+                            ForEach(
+                                ["Produce", "Breakfast", "Bakery", "Dairy", "Snacks"], id: \.self
+                            ) { category in
+                                Toggle(
+                                    category,
+                                    isOn: Binding(
+                                        get: {
+                                            store.follows.contains {
+                                                $0.kind == "category" && $0.target == category
+                                            }
+                                        },
+                                        set: {
+                                            store.setFollow(
+                                                kind: "category", target: category, enabled: $0)
+                                        }))
+                            }
+                        } else {
+                            ForEach(
+                                ["Strawberries", "Breakfast", "Maya R.", "Under $3", "Bakery"],
+                                id: \.self
+                            ) { Text($0) }
+                        }
                     }
                     Section {
                         Text("Demo preferences only; no push notifications are sent.").font(
@@ -220,7 +262,9 @@ struct ProfilePanelView: View {
                     }
                 }.scrollContentBackground(.hidden)
             case .listings:
-                let own = store.catalog.filter { $0.id == "my-granola" }
+                let own =
+                    store.isBackend
+                    ? store.ownListings : store.catalog.filter { $0.id == "my-granola" }
                 if own.isEmpty {
                     VStack {
                         EmptyState(
@@ -237,21 +281,34 @@ struct ProfilePanelView: View {
                     }.listStyle(.plain).scrollContentBackground(.hidden)
                 }
             case .purchases:
-                if store.receipts.isEmpty {
+                let history = store.receipts + store.sales
+                if history.isEmpty {
                     EmptyState(
                         title: "No pickups yet",
                         message: "Complete a rescue run to see your receipts.", symbol: "receipt")
                 } else {
-                    List(store.receipts.indices, id: \.self) { index in
-                        let receipt = store.receipts[index]
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(receipt.seller.name).font(.headline)
-                            Text(receipt.items.map(\.name).joined(separator: ", ")).font(
-                                .subheadline)
-                            Text(
-                                "Demo paid \(Money.text(receipt.paid)) · saved \(Money.text(receipt.totals.saved))"
-                            ).font(.footnote).foregroundStyle(Theme.save)
-                        }.listRowBackground(Theme.ivory)
+                    List {
+                        ForEach(history.indices, id: \.self) { index in
+                            let receipt = history[index]
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(receipt.seller.name).font(.headline)
+                                Text(receipt.items.map(\.name).joined(separator: ", ")).font(
+                                    .subheadline)
+                                Text(
+                                    "Demo paid \(Money.text(receipt.paid)) · saved \(Money.text(receipt.totals.saved))"
+                                ).font(.footnote).foregroundStyle(Theme.save)
+                            }.listRowBackground(Theme.ivory)
+                        }
+                        if store.morePurchases {
+                            Button("Load more purchases") {
+                                Task { await store.loadHistory(selling: false) }
+                            }.disabled(store.historyLoading)
+                        }
+                        if store.moreSales {
+                            Button("Load more sales") {
+                                Task { await store.loadHistory(selling: true) }
+                            }.disabled(store.historyLoading)
+                        }
                     }.listStyle(.plain).scrollContentBackground(.hidden)
                 }
             case .saved:
@@ -277,9 +334,9 @@ struct ProfilePanelView: View {
             case .verification:
                 Form {
                     Section("Demo profile") {
-                        Label("Identity verified", systemImage: "checkmark.seal.fill")
-                        Label("Student verified", systemImage: "graduationcap")
-                        Text("Verification badges are mock data for the demo.").font(.footnote)
+                        Label("Identity verification unavailable", systemImage: "checkmark.shield")
+                        Label("Student verification unavailable", systemImage: "graduationcap")
+                        Text("Verification needs a future trusted provider.").font(.footnote)
                     }
                 }.scrollContentBackground(.hidden)
             case .settings:
@@ -289,17 +346,53 @@ struct ProfilePanelView: View {
                         Text(
                             "Off uses the source design's offline map. On loads Apple's map tiles; seller coordinates remain fictional."
                         ).font(.footnote)
-                        Button("Reset demo", role: .destructive) {
+                        Button(
+                            store.isBackend ? "Clear device cache and refresh" : "Reset demo",
+                            role: .destructive
+                        ) {
                             store.resetDemo()
                             router.sheet = nil
                             router.tab = .discover
                         }
                     }
+                    #if DEBUG
+                        if store.isBackend {
+                            Section("Local demo accounts") {
+                                ForEach(SessionController.shared.accounts, id: \.userId) {
+                                    session in
+                                    Button(
+                                        session.userId
+                                            + (session.userId == store.accountID ? " ✓" : "")
+                                    ) {
+                                        do {
+                                            try SessionController.shared.select(session.userId)
+                                            let repository = try SessionController.shared
+                                                .repository()
+                                            router.sheet = nil
+                                            router.tab = .discover
+                                            Task { await store.connect(repository) }
+                                        } catch { store.notice = error.localizedDescription }
+                                    }.accessibilityIdentifier("account-\(session.userId)")
+                                }
+                                Button("Refresh provisioned accounts") {
+                                    Task {
+                                        do {
+                                            try await SessionController.shared.loadDemoAccounts()
+                                            await store.connect(
+                                                try SessionController.shared.repository())
+                                        } catch { store.notice = error.localizedDescription }
+                                    }
+                                }
+                            }
+                        }
+                    #endif
                     Section("About") {
                         Text("Rescue · Native iPhone demo")
                         Text("SwiftUI · iOS 17+")
                         Text(
-                            "Mock data resets when the app restarts. Onboarding and preferences are saved locally."
+                            store.isBackend
+                                ? "Account data persists on the server. Clearing this device’s cache does not reset shared data."
+                                : "Fixture activity resets when the app restarts."
                         ).font(.footnote)
                     }
                 }.scrollContentBackground(.hidden)

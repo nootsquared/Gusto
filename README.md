@@ -1,7 +1,16 @@
 # Rescue — native iPhone demo
 
-SwiftUI recreation of the Food Rescue Marketplace App Figma Make design. Runs on iOS 17+ with mock data, local photos, offline demo maps, native tabs/sheets, messaging, seller publishing, and a complete pickup/payment/impact flow. No backend, API keys, third-party packages, or permission prompts are required.
+SwiftUI iPhone app for rescuing food, iOS 17+. Normal launches use the local SpacetimeDB
+backend with separate accounts, authorized reservations, persistent messaging, seller publishing,
+pickup/payment simulation, and receipt-derived impact. Browsing survives temporary disconnection
+through account-scoped caches. External authentication, camera, AI, cloud uploads, actual payments,
+push and directions remain future providers.
 
+Start the four local development processes in [MHacksDB/README.md](MHacksDB/README.md),
+then run the app in Simulator. `--fixture` selects the original bundled-photo offline demo;
+`--uitesting` selects fixture mode unless `--backend` is also supplied. Backend failures show an
+honest offline state and never silently substitute fixture records. Debug account switching is
+in You → Settings and selects provisioned Keychain sessions.
 ## Run in Simulator
 
 1. Open `Rescue.xcodeproj` in Xcode 16.4 or later.
@@ -17,7 +26,7 @@ SwiftUI recreation of the Food Rescue Marketplace App Figma Make design. Runs on
 
 Physical-device signing/install requires your Apple account and connected hardware. An unsigned device build validates compilation, not a signed installation. The app contains no Apple Pay, push, camera, or location entitlement to configure.
 
-## Hackathon demo
+## Fixture-mode hackathon demo
 
 1. Discover → Organic Strawberries → Reserve. Close the sheet.
 2. Add Greek Yogurt from Buy again, then use Search for Sourdough Loaf and Rigatoni. Reserve both. The default 0.8mi distance filter includes all four. Filters next to Search combines budget, pickup time, freshness and preferences in one sheet.
@@ -28,14 +37,18 @@ Physical-device signing/install requires your Apple account and connected hardwa
 7. After Rescued, tap Next pickup. Repeat for the remaining sellers. At the last stop, tap See your impact.
 8. Done enters You with updated impact. Purchases & Sales shows local demo receipts.
 
-Payment buttons simulate payment and never charge money. Photos in pickup verification are clearly marked as reference photos. Report issue skips a seller without adding a receipt or impact. Reservations are held for the demo session; no real 30-minute server lock is claimed.
+Payment buttons simulate payment and never charge money. Photos in pickup verification are clearly marked as reference photos. Report issue skips a seller without adding a receipt or impact. Fixture-mode reservations last for the demo session. Backend-mode reservations use an exclusive, server-controlled 30-minute hold; confirmed bookings last through the agreed pickup window plus 15 minutes.
 
 Other flows: Map price pins and carousel, search and filters, Fresh Check, editable chat and quick replies, mock photo scan → safety confirmation → local listing, saved items, impact charts, alerts, and native invitation sharing.
 
-**Offline demo:** all 26 source photos are bundled. The default map recreates the Figma MapArt locally. You → Settings → Use live MapKit basemap enables Apple map tiles; coordinates remain fixed demo locations. Settings → Reset demo restores fixtures and clears demo activity.
+**Offline demo:** all 26 source photos are bundled. The default map recreates the Figma MapArt locally. You → Settings → Use live MapKit basemap enables Apple map tiles; coordinates remain fixed demo locations. In fixture mode, Settings → Reset demo restores fixtures. In backend mode, Clear device cache and refresh only clears this device and never resets shared server data.
 
 ## Tests and development
 
+The TypeScript backend lives in `MHacksDB/`. Its isolated integration suite tests
+sender authorization, privacy, reservation races/expiry, message retry deduplication, publishing,
+seller handoff, trusted payment completion, immutable history, and non-destructive republishing.
+See [API contracts](docs/backend/CONTRACT.md) and [testing](docs/TESTING.md).
 ```sh
 swift test
 python3 Scripts/generate_project.py  # after adding/moving Swift files

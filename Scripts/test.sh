@@ -15,5 +15,5 @@ result="work/RescueTests-$(date +%Y%m%d-%H%M%S).xcresult"
 xcodebuild -project Rescue.xcodeproj -scheme Rescue \
     -destination "platform=iOS Simulator,id=$device_id" \
     -derivedDataPath work/DerivedData -resultBundlePath "$result" \
-    -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test
+    -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- test
 echo "Results: $result"

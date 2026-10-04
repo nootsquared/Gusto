@@ -16,12 +16,19 @@ struct SellView: View {
     @State private var priceChoice: PriceChoice = .recommended
     @State private var customPrice = 300.0
     @State private var pickup = "Tonight 6–9"
+    @FocusState private var nameFocused: Bool
+    @State private var draftAccount = ""
     @State private var confirmations: Set<String> = []
     private let safety = [
         "Stored as labeled", "Date is accurate", "Condition as shown", "Allergens: oats, almonds",
     ]
     private var price: Int {
         priceChoice == .fast ? 200 : priceChoice == .recommended ? 300 : Int(customPrice)
+    }
+    private var draftSnapshot: SellDraft {
+        SellDraft(
+            name: name, price: price, freshness: freshness, pickup: pickup,
+            confirmations: confirmations, hasPhoto: phase == .editing)
     }
     var body: some View {
         Group {
@@ -75,7 +82,8 @@ struct SellView: View {
                             Theme.apricot)
                     }
                     Section("Item") {
-                        TextField("Name", text: $name).accessibilityIdentifier("sell-name")
+                        TextField("Name", text: $name).focused($nameFocused)
+                            .accessibilityIdentifier("sell-name")
                         Text("Breakfast · sealed · 12 oz · best by Nov 18")
                     }
                     Section("Freshness") {
@@ -135,12 +143,16 @@ struct SellView: View {
                                     || name.trimmingCharacters(in: .whitespaces).isEmpty,
                                 id: "publish-listing"
                             ) {
-                                if store.publish(
-                                    name: name, price: price, freshness: freshness, pickup: pickup,
-                                    confirmations: confirmations.count)
-                                {
-                                    phase = .published
-                                    Haptic.success()
+                                Task {
+                                    if await store.publishListing(
+                                        name: name, price: price, freshness: freshness,
+                                        pickup: pickup,
+                                        confirmations: confirmations.count)
+                                    {
+                                        phase = .published
+                                        SellDraft.clear(account: store.accountID)
+                                        Haptic.success()
+                                    }
                                 }
                             }
                         }
@@ -155,9 +167,17 @@ struct SellView: View {
                     Image(systemName: "checkmark.circle.fill").rescueFont(44).foregroundStyle(
                         Theme.sage)
                     Text("You're live").rescueFont(30, .bold).accessibilityIdentifier("published")
-                    Text("Listed in your local demo catalog").rescueFont(15).foregroundStyle(
+                    Text(
+                        store.isBackend
+                            ? "Published to your account’s database"
+                            : "Listed in your local demo catalog"
+                    ).rescueFont(15).foregroundStyle(
                         Theme.secondary)
-                    Text("No listing was sent to a server.").rescueFont(13).foregroundStyle(
+                    Text(
+                        store.isBackend
+                            ? "Photo capture and analysis are simulated."
+                            : "No listing was sent to a server."
+                    ).rescueFont(13).foregroundStyle(
                         Theme.muted)
                     Spacer()
                     PrimaryButton(title: "List another") {
@@ -166,6 +186,32 @@ struct SellView: View {
                     }
                     Button("Done") { router.tab = .discover }.padding()
                 }.padding(24).background(Theme.ivory)
+            }
+        }.task(id: store.accountID) {
+            draftAccount = store.accountID
+            name = "Maple Granola"
+            freshness = .fresh
+            priceChoice = .recommended
+            customPrice = 300
+            confirmations = []
+            phase = .camera
+            if store.isBackend, let draft = SellDraft.load(account: store.accountID) {
+                name = draft.name
+                freshness = draft.freshness
+                priceChoice = .custom
+                customPrice = Double(draft.price)
+                pickup = draft.pickup
+                confirmations = draft.confirmations
+                phase = draft.hasPhoto ? .editing : .camera
+            }
+        }.onChange(of: draftSnapshot) { _, draft in
+            if store.isBackend && draftAccount == store.accountID && phase != .published {
+                draft.save(account: store.accountID)
+            }
+        }.toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { nameFocused = false }
             }
         }.navigationTitle("Sell").navigationBarTitleDisplayMode(.inline).foregroundStyle(Theme.ink)
     }
