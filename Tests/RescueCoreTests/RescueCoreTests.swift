@@ -18,6 +18,18 @@ import XCTest
         XCTAssertTrue(store.startRun())
     }
 
+    func testBrowseLocationRecalculatesDistancesAndFilters() {
+        let store = makeStore()
+        let seller = store.sellers.first!
+        store.updateBrowseLocation(latitude: seller.latitude, longitude: seller.longitude)
+        XCTAssertEqual(store.catalog.first { $0.sellerID == seller.id }!.distance, 0, accuracy: 0.001)
+        store.updateBrowseLocation(latitude: 0, longitude: 0)
+        XCTAssertTrue(store.visibleListings(query: "").isEmpty)
+        let distances = store.catalog.map(\.distance)
+        store.updateBrowseLocation(latitude: .nan, longitude: 0)
+        XCTAssertEqual(store.catalog.map(\.distance), distances)
+    }
+
     func testExactSourceCatalogAndIntegerTotals() async {
         let store = makeStore()
         reserveDemo(store)

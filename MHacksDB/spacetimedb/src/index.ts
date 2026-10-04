@@ -159,7 +159,7 @@ function indexListing(ctx: Ctx, row: ReturnType<typeof listing>) {
 function discover(ctx: Ctx, q: RequestData) {
   const spec = JSON.parse(q.text || '{}') as { query?: string; area?: string; maxPrice?: number; freshness?: string[]; categories?: string[]; vegetarian?: boolean; unopened?: boolean; tonight?: boolean; tomorrow?: boolean; minimumRating?: number; distance?: number; latitude?: number; longitude?: number };
   const query = (spec.query || '').toLowerCase().replace(/\s+/g, ' ').trim();
-  const area = spec.area || 'Linden Park';
+  const area = spec.area || '';
   const normalized = json({ ...spec, query, area });
   let afterOrder = 0n, afterID = '';
   if (q.cursor) { const c = JSON.parse(q.cursor); if (c.spec !== normalized) fail('stale_version'); afterOrder = BigInt(c.order); afterID = c.id; }
@@ -169,8 +169,8 @@ function discover(ctx: Ctx, q: RequestData) {
   const range = new Range<bigint>({tag:'included',value:afterOrder});
   const smallest = [...words].sort((a,b) => (ctx.db.searchTermStats.id.find(`${area}:${a}`)?.count ?? 0) - (ctx.db.searchTermStats.id.find(`${area}:${b}`)?.count ?? 0))[0];
   const source = smallest
-    ? ctx.db.listingSearchTerms.byTerm.filter([area,smallest,range])
-    : ctx.db.listings.byArea.filter([area,'published',range]);
+    ? (area ? ctx.db.listingSearchTerms.byTerm.filter([area,smallest,range]) : ctx.db.listingSearchTerms.byGlobalTerm.filter([smallest,range]))
+    : (area ? ctx.db.listings.byArea.filter([area,'published',range]) : ctx.db.listings.byPublished.filter(['published',range]));
   const iterator = source[Symbol.iterator]();
   const results: ReturnType<typeof listingProjection>[] = []; let scanned = 0;
   const limit = Math.min(q.value || (q.action === 'map' ? 100 : 30), q.action === 'map' ? 100 : 50);
@@ -188,7 +188,8 @@ function discover(ctx: Ctx, q: RequestData) {
     const labels=[...ctx.db.listingTags.listingId.filter(l.id)].map(link=>ctx.db.tags.id.find(link.tagId)?.label??'').join(' ');
     if (!words.every(w => tokens(`${labels} ${l.title} ${l.category} ${l.vegetarian ? 'vegetarian' : ''} ${l.opened ? '' : 'unopened'}`).includes(w))) continue;
     const p = listingProjection(ctx, l); const s = sellerProjection(ctx, l.sellerId);
-    p.distance = distance(spec.latitude ?? 42.28, spec.longitude ?? -83.74, s.latitude, s.longitude);
+    const pickupLoc=p.windows[0] && ctx.db.pickupLocations.id.find(p.windows[0].locationID);
+    p.distance = distance(spec.latitude ?? 42.28, spec.longitude ?? -83.74, pickupLoc?.latitude??s.latitude, pickupLoc?.longitude??s.longitude);
     if (p.distance > (spec.distance ?? 100) || s.rating < (spec.minimumRating ?? 0)) continue;
     if (query.includes('north campus') && !s.area.toLowerCase().includes('north')) continue;
     const windows = p.windows;

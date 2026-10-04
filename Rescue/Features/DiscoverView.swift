@@ -20,6 +20,7 @@ struct CartButton: View {
 }
 
 struct DiscoverView: View {
+    @Environment(LocationController.self) private var location
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
     @State private var searchText = ""
@@ -36,6 +37,7 @@ struct DiscoverView: View {
     private struct SearchContext: Equatable {
         let query: String
         let filters: Filters
+        let location: BrowseLocation?
     }
     private var feed: [Listing] { store.visibleListings(query: "") }
     private var picked: [Listing] {
@@ -63,11 +65,28 @@ struct DiscoverView: View {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(spacing: 20) {
                     HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Good evening").rescueFont(32, .bold).tracking(-0.8)
-                            Label("Near Linden Park", systemImage: "mappin.and.ellipse").rescueFont(
-                                15
-                            ).foregroundStyle(Theme.secondary)
+                        VStack(alignment: .leading, spacing: 8) {
+                            TimelineView(.periodic(from: .now, by: 60)) { context in
+                                (Text(
+                                    greeting(at: context.date) + (firstName == nil ? "" : ", ")
+                                )
+                                .foregroundColor(Theme.ink)
+                                    + Text(firstName ?? "").foregroundColor(Theme.save))
+                                    .rescueFont(26, .bold).tracking(-0.3)
+                                    .lineLimit(1).minimumScaleFactor(0.75)
+                                    .accessibilityIdentifier("personal-greeting")
+                            }
+                            Button {
+                                router.sheet = .location
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: location.usingGPS ? "location.fill" : "mappin")
+                                        .font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.sage)
+                                    Text(location.label).lineLimit(1).truncationMode(.tail)
+                                    Image(systemName: "chevron.down").font(
+                                        .system(size: 10, weight: .semibold))
+                                }.rescueFont(13, .medium).foregroundStyle(Theme.secondary)
+                            }.buttonStyle(.plain).accessibilityIdentifier("browse-location")
                         }
                         Spacer()
                         CartButton()
@@ -245,7 +264,7 @@ struct DiscoverView: View {
             .animation(Theme.spring, value: searchActive)
             .task(
                 id: SearchContext(
-                    query: trimmedSearch, filters: store.filters)
+                    query: trimmedSearch, filters: store.filters, location: location.selection)
             ) {
                 let request = UUID()
                 searchRequest = request

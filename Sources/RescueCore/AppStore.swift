@@ -3,6 +3,7 @@ import Observation
 
 /// One presentation store for connected and fixture modes. Views own transient input.
 @MainActor @Observable public final class AppStore {
+    private var browseOrigin: (latitude: Double, longitude: Double)?
     public var catalog: [Listing] = MockCatalog.listings
     public private(set) var sellers: [Seller] = MockCatalog.sellers
     public private(set) var isBackend = false
@@ -584,6 +585,30 @@ extension AppStore {
         profileName = "Connect local demo"
         online = false
     }
+    public func updateBrowseLocation(latitude: Double, longitude: Double) {
+        guard latitude.isFinite, longitude.isFinite,
+            (-90...90).contains(latitude), (-180...180).contains(longitude)
+        else { return }
+        browseOrigin = (latitude, longitude)
+        recalculateBrowseDistances()
+    }
+    private func recalculateBrowseDistances() {
+        guard let origin = browseOrigin else { return }
+        func adjusted(_ item: Listing) -> Listing {
+            guard let seller = sellers.first(where: { $0.id == item.sellerID }) else { return item }
+            var result = item
+            let rad = Double.pi / 180
+            let dLat = (seller.latitude - origin.latitude) * rad
+            let dLon = (seller.longitude - origin.longitude) * rad
+            let a =
+                pow(sin(dLat / 2), 2)
+                + cos(origin.latitude * rad) * cos(seller.latitude * rad) * pow(sin(dLon / 2), 2)
+            result.distance = 3958.7613 * 2 * asin(sqrt(min(1, max(0, a))))
+            return result
+        }
+        catalog = catalog.map(adjusted)
+        searchResults = searchResults.map(adjusted)
+    }
     private func merge(_ items: [Listing]) {
         for item in items {
             if let i = catalog.firstIndex(where: { $0.id == item.id }) {
@@ -601,6 +626,7 @@ extension AppStore {
                 sellers.append(item)
             }
         }
+        recalculateBrowseDistances()
     }
     private func apply(_ snapshot: BackendBootstrap) {
         profileName = snapshot.user.name
@@ -631,6 +657,7 @@ extension AppStore {
         } else {
             runReceipts = []
         }
+        recalculateBrowseDistances()
     }
     public func loadHistory(selling: Bool) async {
         guard let repository, !historyLoading else { return }
@@ -704,6 +731,34 @@ extension AppStore {
             lastFeedRefresh = Date()
         } catch { if generation == sessionGeneration { online = false } }
     }
+    public func loadMapArea(latitude: Double, longitude: Double, radiusMiles: Double) async throws {
+        guard let repository else { return }
+        guard latitude.isFinite, longitude.isFinite, radiusMiles.isFinite,
+            (-90...90).contains(latitude), (-180...180).contains(longitude), radiusMiles > 0
+        else { return }
+        let generation = sessionGeneration
+        let spec: [String: Any] = [
+            "query": "", "latitude": latitude, "longitude": longitude,
+            "distance": radiusMiles, "maxPrice": filters.maxPrice,
+            "vegetarian": filters.vegetarian, "unopened": filters.unopened,
+            "freshness": filters.freshness.map(\.rawValue),
+            "categories": Array(filters.categories), "minimumRating": filters.minimumRating,
+            "tonight": filters.tonight, "tomorrow": filters.tomorrow,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: spec, options: .sortedKeys)
+        var request = APIRequest("search", text: String(decoding: data, as: UTF8.self))
+        var seenCursors: Set<String> = []
+        repeat {
+            try Task.checkCancellation()
+            let response = try await repository.request(request)
+            guard generation == sessionGeneration else { throw CancellationError() }
+            let page = try JSONDecoder().decode(BackendPage.self, from: response.payload)
+            merge(page.listings)
+            mergeSellers(page.sellers)
+            request.cursor = page.cursor
+        } while !request.cursor.isEmpty && seenCursors.insert(request.cursor).inserted
+    }
+
     public func searchBackend(_ text: String) async {
         guard let repository else { return }
         searchGeneration = UUID()
@@ -715,13 +770,17 @@ extension AppStore {
         do {
             try await Task.sleep(nanoseconds: 300_000_000)
             try Task.checkCancellation()
-            let spec: [String: Any] = [
+            var spec: [String: Any] = [
                 "query": text, "maxPrice": filters.maxPrice, "distance": filters.distance,
                 "vegetarian": filters.vegetarian, "unopened": filters.unopened,
                 "freshness": filters.freshness.map(\.rawValue),
                 "categories": Array(filters.categories), "minimumRating": filters.minimumRating,
                 "tonight": filters.tonight, "tomorrow": filters.tomorrow,
             ]
+            if let origin = browseOrigin {
+                spec["latitude"] = origin.latitude
+                spec["longitude"] = origin.longitude
+            }
             let data = try JSONSerialization.data(withJSONObject: spec, options: .sortedKeys)
             let request = APIRequest("search", text: String(decoding: data, as: UTF8.self))
             if let cached = await repository.cached(request.cacheKey, maxAge: .infinity),

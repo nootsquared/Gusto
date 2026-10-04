@@ -18,5 +18,7 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Gusto uses your location to show food near you and calculate seller distances.</string>
 </dict>
 </plist>

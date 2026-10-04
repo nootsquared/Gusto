@@ -12,6 +12,7 @@ const userPreferences = table({ name: 'user_preferences' }, {
 });
 const listings = table({ name: 'listings', indexes: [
   { accessor: 'bySeller', algorithm: 'btree', columns: ['sellerId', 'status'] },
+  { accessor: 'byPublished', algorithm: 'btree', columns: ['status', 'creationOrder', 'id'] },
   { accessor: 'byArea', algorithm: 'btree', columns: ['area', 'status', 'creationOrder', 'id'] },
 ]}, {
   id: t.string().primaryKey(), sellerId: t.string(), title: t.string(), description: t.string(),
@@ -45,6 +46,7 @@ const listingTags = table({ name: 'listing_tags' }, {
   id: t.string().primaryKey(), listingId: t.string().index('btree'), tagId: t.string(),
 });
 const listingSearchTerms = table({ name: 'listing_search_terms', indexes: [
+  { accessor: 'byGlobalTerm', algorithm: 'btree', columns: ['token', 'creationOrder', 'listingId'] },
   { accessor: 'byTerm', algorithm: 'btree', columns: ['area', 'token', 'creationOrder', 'listingId'] },
 ]}, { id: t.string().primaryKey(), listingId: t.string().index('btree'), area: t.string(), token: t.string(), created: t.u64(), creationOrder: t.u64() });
 const searchTermStats = table({ name: 'search_term_stats' }, {

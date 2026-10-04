@@ -11,14 +11,16 @@ import SwiftUI
                 && !ProcessInfo.processInfo.arguments.contains("--backend"))
     )
     @State private var router = AppRouter()
+    @State private var location = LocationController()
     var body: some Scene {
         WindowGroup {
-            RootView().environment(store).environment(router).preferredColorScheme(.light)
+            RootView().environment(store).environment(router).environment(location).preferredColorScheme(.light)
         }
     }
 }
 
 struct RootView: View {
+    @Environment(LocationController.self) private var location
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
     @AppStorage("hasOnboarded") private var hasOnboarded = false
@@ -168,6 +170,20 @@ struct RootView: View {
                 showOnboarding =
                     !hasOnboarded && !ProcessInfo.processInfo.arguments.contains("--uitesting")
             }
+            .onChange(of: store.online) { _, online in
+                if online && !ProcessInfo.processInfo.arguments.contains("--uitesting") {
+                    location.requestInitially()
+                }
+            }
+            .onChange(of: location.selection, initial: true) { _, selection in
+                if let selection, !ProcessInfo.processInfo.arguments.contains("--uitesting") {
+                    store.updateBrowseLocation(latitude: selection.latitude, longitude: selection.longitude)
+                }
+            }
+            .onChange(of: scenePhase, initial: true) { _, phase in
+                guard !ProcessInfo.processInfo.arguments.contains("--uitesting") else { return }
+                if phase == .active { location.resume() } else { location.pause() }
+            }
             .onChange(of: store.phase) { previous, phase in
                 if store.isBackend && previous == .idle && phase == .enroute {
                     router.tab = .map
@@ -202,6 +218,7 @@ struct SheetHost: View {
                 case .listing(let id): ListingDetailView(id: id)
                 case .cart: CartView()
                 case .filters: FiltersView()
+                case .location: LocationPickerView()
                 case .collection(let title, let ids): CollectionView(title: title, ids: ids)
                 case .chat(let seller): ChatView(sellerID: seller)
                 case .run: PickupFlowView()
@@ -258,7 +275,7 @@ struct OnboardingView: View {
                     ).rescueFont(16).foregroundStyle(Theme.secondary)
                     Spacer(minLength: 12)
                     PrimaryButton(title: "Find food nearby", id: "begin-demo", action: onDone)
-                    Text("Uses a fixed demo area · no location permission needed").rescueFont(12)
+                    Text("Use your location or choose a neighborhood").rescueFont(12)
                         .foregroundStyle(Theme.muted).frame(maxWidth: .infinity)
                 }.padding(28)
             }.frame(maxHeight: .infinity).background(Theme.ivory).foregroundStyle(Theme.ink)

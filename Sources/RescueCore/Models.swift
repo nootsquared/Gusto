@@ -26,7 +26,7 @@ public struct Listing: Identifiable, Hashable, Codable, Sendable {
     public var name: String
     public var price: Int
     public let retail: Int
-    public let distance: Double
+    public var distance: Double
     public var freshness: Freshness
     public let pickup: String
     public var updated: String
