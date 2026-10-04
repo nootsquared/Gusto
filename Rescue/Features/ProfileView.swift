@@ -216,7 +216,7 @@ struct ProfilePanelView: View {
                                 ? Binding(
                                     get: { store.preferences?.smartAlerts ?? false },
                                     set: { store.updateSmartAlerts($0) }) : $smartAlerts)
-                        if store.isBackend {
+                        if store.isBackend && SessionController.shared.isLocalBackend {
                             Text(
                                 "Push delivery is not connected. Preferences and follows are saved to this account."
                             ).font(.footnote)
@@ -386,6 +386,16 @@ struct ProfilePanelView: View {
                             }
                         }
                     #endif
+                    if store.isBackend && !SessionController.shared.isLocalBackend {
+                        Section("Account") {
+                            Button("Sign out", role: .destructive) {
+                                SessionController.shared.signOut()
+                                store.disconnectBackend()
+                                router.sheet = nil
+                                router.tab = .discover
+                            }.accessibilityIdentifier("sign-out")
+                        }
+                    }
                     Section("About") {
                         Text("Rescue · Native iPhone demo")
                         Text("SwiftUI · iOS 17+")

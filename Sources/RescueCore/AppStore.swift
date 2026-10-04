@@ -524,6 +524,46 @@ extension AppStore {
         await refreshBackend(force: true)
         await loadNextPage(first: true)
     }
+    public func disconnectBackend() {
+        sessionGeneration = UUID()
+        planGeneration = UUID()
+        repository = nil
+        accountID = ""
+        isBackend = true
+        online = false
+        backendBusy = false
+        catalog = []
+        sellers = []
+        cart = []
+        savedIDs = []
+        messages = [:]
+        receipts = []
+        sales = []
+        morePurchases = false
+        moreSales = false
+        historyLoading = false
+        monthly = []
+        ownListings = []
+        conversations = []
+        follows = []
+        preferences = nil
+        runReceipts = []
+        plan = nil
+        phase = .idle
+        stopIndex = 0
+        feedCursor = ""
+        activeChat = nil
+        messageSequences = [:]
+        lastFeedRefresh = .distantPast
+        searchResults = []
+        checkingIDs = []
+        typingSellers = []
+        notice = nil
+        feedLoading = false
+        searchGeneration = UUID()
+        lastRefresh = .distantPast
+        profileName = "Sign in to Rescue"
+    }
     public func enterBackendMode() {
         // First launch without a provisioned session must never display fixture product data.
         isBackend = true

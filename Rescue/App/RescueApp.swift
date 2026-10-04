@@ -68,7 +68,7 @@ struct RootView: View {
             {
                 store.enterBackendMode()
                 do {
-                    if SessionController.shared.current == nil {
+                    if SessionController.shared.isLocalBackend && SessionController.shared.current == nil {
                         try await SessionController.shared.loadDemoAccounts()
                     }
                     #if DEBUG
@@ -78,11 +78,46 @@ struct RootView: View {
                             try SessionController.shared.select(args[index + 1])
                         }
                     #endif
-                    await store.connect(try SessionController.shared.repository())
+                    if SessionController.shared.isLocalBackend {
+                        await store.connect(try SessionController.shared.repository())
+                    }
                 } catch {
                     NSLog("Rescue session setup failed: %@", error.localizedDescription)
                     store.notice = error.localizedDescription
                 }
+            }
+        }.task(id: SessionController.shared.current?.userId) {
+            guard store.isBackend, !SessionController.shared.isLocalBackend else { return }
+            guard SessionController.shared.current != nil else { store.disconnectBackend(); return }
+            do {
+                _ = try await SessionController.shared.currentSession()
+                await store.connect(try SessionController.shared.repository())
+            } catch { store.notice = error.localizedDescription }
+        }.overlay {
+            if store.isBackend && !SessionController.shared.isLocalBackend
+                && SessionController.shared.current == nil
+            {
+                VStack(spacing: 20) {
+                    Image(systemName: "leaf.fill").font(.system(size: 48)).foregroundStyle(Theme.save)
+                    Text("Welcome to Rescue").rescueFont(28, .bold)
+                    Text("Sign in to rescue food, message sellers, and keep your impact.")
+                        .rescueFont(16).multilineTextAlignment(.center)
+                    Button {
+                        Task { await SessionController.shared.signIn() }
+                    } label: {
+                        HStack {
+                            if SessionController.shared.signingIn { ProgressView() }
+                            Text(SessionController.shared.signingIn ? "Signing in…" : "Sign in with Google")
+                        }.frame(maxWidth: .infinity).padding()
+                    }.buttonStyle(.borderedProminent).tint(Theme.save)
+                        .disabled(SessionController.shared.signingIn)
+                        .accessibilityIdentifier("google-sign-in")
+                    if let error = SessionController.shared.authError {
+                        Text(error).rescueFont(14).foregroundStyle(Theme.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Theme.ivory.ignoresSafeArea())
             }
         }.task(id: "\(scenePhase)-\(store.isBackend)-\(store.accountID)") {
             if scenePhase == .active { await store.pollBackend() }

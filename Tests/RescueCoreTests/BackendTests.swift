@@ -103,6 +103,36 @@ private final class StubURLProtocol: URLProtocol {
             XCTFail("Must reject")
         } catch RepositoryError.server(let code) { XCTAssertEqual(code, "unavailable") }
     }
+    func testSessionProviderRefreshAndAccountBoundary() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubURLProtocol.self]
+        let payload = try bootstrap("a")
+        StubURLProtocol.handler = { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer refreshed")
+            return try self.wire(payload)
+        }
+        let repo = HTTPRepository(server: URL(string: "https://example.com")!, database: "test",
+            session: BackendSession(userId: "a", token: "expired"), cacheRoot: folder,
+            network: URLSession(configuration: configuration),
+            sessionProvider: { BackendSession(userId: "a", token: "refreshed") })
+        _ = try await repo.request(APIRequest("bootstrap"))
+        let wrong = HTTPRepository(server: URL(string: "https://example.com")!, database: "test",
+            session: BackendSession(userId: "a", token: "expired"), cacheRoot: folder,
+            network: URLSession(configuration: configuration),
+            sessionProvider: { BackendSession(userId: "b", token: "other") })
+        do {
+            _ = try await wrong.request(APIRequest("bootstrap"))
+            XCTFail("Cross-account session must not be sent")
+        } catch RepositoryError.server(let code) { XCTAssertEqual(code, "unauthorized") }
+        let store = AppStore(service: DemoService(delayNanoseconds: 0), fixtureMode: false)
+        await store.connect(repo)
+        store.disconnectBackend()
+        XCTAssertTrue(store.accountID.isEmpty)
+        XCTAssertTrue(store.catalog.isEmpty)
+        XCTAssertTrue(store.receipts.isEmpty)
+        XCTAssertTrue(store.messages.isEmpty)
+        XCTAssertFalse(store.online)
+    }
     func testAccountScopedCachesAndOutboxes() async throws {
         let a = repository("a")
         let b = repository("b")

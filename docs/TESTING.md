@@ -24,6 +24,8 @@ Both commands create an isolated `rescue-test-*` database, seed it through owner
 exercise authenticated APIs, and republish with `--delete-data=never`. They leave records intact
 for inspection. The load test uses 2,000 packages and checks continuation after 500 candidates.
 
+Connected Simulator tests explicitly use `--local-backend`; normal app launches select
+Maincloud and show real sign-in when no cloud session is present.
 Connected Simulator flows require the database, media and separate simulator processes from
 MHacksDB/README.md. Simulator builds need ad-hoc signing for Keychain access; an unsigned
 Simulator app cannot store sessions. No development-team enrollment is required for local signing.
@@ -140,4 +142,26 @@ The generated manifest maps file names to Discover, listing, cart, pickup plan, 
 
 ## Practical boundaries
 
-Automated coverage includes the local backend and Simulator integration. Live MapKit tiles, cloud hosting, actual payments, push delivery, camera recognition and physical-device signing remain outside this local implementation. Dynamic Type, VoiceOver and different iPhone sizes should also receive manual review before a production release. The app uses scaled fonts and native accessibility controls, with reduced-motion support for the shared spring animation.
+Automated coverage includes the local backend and Simulator integration. Live MapKit tiles, actual payments, push delivery, camera recognition and physical-device signing remain outside the automated coverage. Cloud authentication verification is described below. Dynamic Type, VoiceOver and different iPhone sizes should also receive manual review before a production release. The app uses scaled fonts and native accessibility controls, with reduced-motion support for the shared spring animation.
+
+## Cloud authentication verification
+
+`OAuthTests` checks the RFC 7636 PKCE vector, callback state/destination/duplicate guards,
+and token response issuer/project/audience/nonce/expiry binding. BackendTests verifies
+refreshed-token transport, rejects a cross-account session provider, and clears visible
+private data on sign-out. `MHacksDB/scripts/auth-test.mjs` tests registration claim restrictions.
+The cloud `register_profile` endpoint rejects forged and non-app administrative tokens.
+`RescueUITests/testCloudLaunchRequiresSignIn` verifies the cloud sign-in screen without
+using local demo credentials. Run on a Simulator with no saved cloud session.
+
+A real Google login is a manual verification: sign in, confirm one `users` and
+`user_identities` row, sign out and in again, and confirm no duplicate rows. Then relaunch
+and verify restoration. Expiry/refresh and successful server registration need live
+provider verification in addition to the deterministic tests; do not claim success from
+compilation or the sign-in screen alone.
+
+Cloud catalog verification (October 4): `seed_cloud_catalog` installed 200 listings and
+12 sample profiles alongside the existing authenticated account. A second owner call did
+not duplicate records; an anonymous call was rejected with `unauthorized`. Simulator
+verification showed populated Discover cards and bundled sample photos using the saved
+Google session. Local simulation remained disabled on Maincloud.

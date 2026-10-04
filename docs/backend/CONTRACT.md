@@ -137,3 +137,16 @@ The current server planner groups by seller/location, uses coarse straight-line 
 15 mph estimates, and bounds plans to available windows. Shortest and fastest can coincide under
 that travel estimate. Best timing uses closing windows. Schedule acceptance shifts downstream
 stops and removes confirmation when a window no longer fits; extending a window is unavailable.
+
+## Cloud registration
+
+`register_profile` takes one positional string argument, the SpacetimeAuth ID token,
+and the same token in the HTTP Authorization bearer header. The procedure verifies
+the token/caller pair through the fixed Maincloud identity verification endpoint outside
+the transaction, then requires the Rescue issuer, project, audience and unexpired token.
+The token is never logged or stored in product tables. New registrations atomically create
+`users`, `user_identities`, `user_preferences`, `carts`, `seller_stats` and
+`notification_preferences`. Repeated calls return the existing active user ID. Disabled
+accounts are not reactivated. The result uses the API v1 envelope with `{userId}` payload.
+HTTP calls in SDK 2.10 do not expose JWT claims through `senderAuth`, hence the explicit
+verified token argument; unverified client-supplied IDs/claims never authorize registration.

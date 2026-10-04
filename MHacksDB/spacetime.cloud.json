@@ -1,0 +1,5 @@
+{
+  "server": "https://maincloud.spacetimedb.com",
+  "database": "mhacks-pranav-dev-975fp",
+  "module-path": "./spacetimedb"
+}

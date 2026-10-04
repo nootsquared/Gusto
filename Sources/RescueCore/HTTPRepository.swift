@@ -8,6 +8,7 @@ import Foundation
 public actor HTTPRepository: RescueRepository {
     public nonisolated let accountID: String
     private let session: BackendSession
+    private let sessionProvider: (@Sendable () async throws -> BackendSession)?
     private let server: URL
     private let database: String
     private let folder: URL
@@ -27,11 +28,13 @@ public actor HTTPRepository: RescueRepository {
 
     public init(
         server: URL, database: String, session: BackendSession, cacheRoot: URL,
-        network: URLSession = .shared
+        network: URLSession = .shared,
+        sessionProvider: (@Sendable () async throws -> BackendSession)? = nil
     ) {
         self.server = server
         self.database = database
         self.session = session
+        self.sessionProvider = sessionProvider
         self.network = network
         accountID = session.userId
         let namespace = Data("\(server.absoluteString)/\(database)/\(session.userId)".utf8)
@@ -129,7 +132,18 @@ public actor HTTPRepository: RescueRepository {
             return try await task.value
         }
         let endpoint = server.appendingPathComponent("v1/database/\(database)/call/api")
-        let token = session.token
+        let activeSession = try await sessionProvider?() ?? session
+        guard activeSession.userId == accountID else {
+            throw RepositoryError.server("unauthorized")
+        }
+        // The session provider may refresh asynchronously; another request can start meanwhile.
+        if let task = inFlight[key] {
+            guard inFlightRequests[key] == request else {
+                throw RepositoryError.server("stale_version")
+            }
+            return try await task.value
+        }
+        let token = activeSession.token
         let network = network
         let task = Task<APIResponse, Error> {
             var http = URLRequest(url: endpoint)

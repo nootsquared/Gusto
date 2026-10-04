@@ -1,13 +1,17 @@
 # Rescue — native iPhone demo
 
-SwiftUI iPhone app for rescuing food, iOS 17+. Normal launches use the local SpacetimeDB
-backend with separate accounts, authorized reservations, persistent messaging, seller publishing,
+SwiftUI iPhone app for rescuing food, iOS 17+. Normal launches select the Maincloud database
+`mhacks-pranav-dev-975fp`. Sign in through SpacetimeAuth using Google. First sign-in
+creates a server-authorized profile; returning users retain the same account.
+Debug launches with `--local-backend` use the local SpacetimeDB backend with separate
+accounts, authorized reservations, persistent messaging, seller publishing,
 pickup/payment simulation, and receipt-derived impact. Browsing survives temporary disconnection
-through account-scoped caches. External authentication, camera, AI, cloud uploads, actual payments,
+through account-scoped caches. Camera, AI, cloud uploads, actual payments,
 push and directions remain future providers.
 
 Start the four local development processes in [MHacksDB/README.md](MHacksDB/README.md),
-then run the app in Simulator. `--fixture` selects the original bundled-photo offline demo;
+then run the app in Simulator with the `--local-backend` launch argument.
+`--fixture` selects the original bundled-photo offline demo;
 `--uitesting` selects fixture mode unless `--backend` is also supplied. Backend failures show an
 honest offline state and never silently substitute fixture records. Debug account switching is
 in You → Settings and selects provisioned Keychain sessions.

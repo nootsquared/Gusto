@@ -63,129 +63,137 @@ struct DiscoverView: View {
                         .buttonStyle(.plain).accessibilityLabel("Filters")
                     }
                 }.padding(.horizontal, 20).padding(.top, 12)
-                FeedSection(
-                    title: "Picked for you", subtitle: "Based on what you rescue", items: picked
-                ) { rail(picked) }
-                FeedSection(
-                    title: "Buy again",
-                    items: store.buyAgainListings.filter {
-                        store.filters.accepts($0, sellers: store.sellers)
+                if store.isBackend && store.catalog.isEmpty {
+                    EmptyState(
+                        title: store.online ? "No listings yet" : "Unable to load listings",
+                        message: store.online
+                            ? "Food shared by sellers will appear here. Be the first to list something."
+                            : "Check your connection, then pull down to try again.")
+                    if store.online {
+                        PrimaryButton(title: "List food", id: "empty-feed-sell") {
+                            router.tab = .sell
+                        }.padding(.horizontal, 20)
                     }
-                ) {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 16) {
-                            ForEach(
-                                store.buyAgainListings.filter {
-                                    store.filters.accepts($0, sellers: store.sellers)
+                } else {
+                    FeedSection(
+                        title: "Picked for you", subtitle: "Based on what you rescue", items: picked
+                    ) { rail(picked) }
+                    FeedSection(
+                        title: "Buy again",
+                        items: store.buyAgainListings.filter {
+                            store.filters.accepts($0, sellers: store.sellers)
+                        }
+                    ) {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 16) {
+                                ForEach(
+                                    store.buyAgainListings.filter {
+                                        store.filters.accepts($0, sellers: store.sellers)
+                                    }
+                                ) { item in
+                                    Button {
+                                        if store.reserve(item.id) { Haptic.success() }
+                                    } label: {
+                                        HStack(spacing: 12) {
+                                            FoodPhoto(name: item.image).frame(width: 64, height: 64)
+                                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                            VStack(alignment: .leading, spacing: 6) {
+                                                Text(
+                                                    item.name.replacingOccurrences(
+                                                        of: "Organic ", with: ""
+                                                    ).replacingOccurrences(of: "Unopened ", with: "")
+                                                        .replacingOccurrences(of: "Ripe ", with: "")
+                                                ).rescueFont(16, .semibold).lineLimit(1)
+                                                if store.cart.contains(item.id) {
+                                                    Label("Reserved", systemImage: "checkmark")
+                                                        .rescueFont(14, .medium).foregroundStyle(
+                                                            Theme.save)
+                                                } else {
+                                                    HStack(spacing: 8) {
+                                                        Text(Money.text(item.price)).rescueFont(
+                                                            15, .bold
+                                                        )
+                                                        .foregroundStyle(Theme.ink)
+                                                        Text("\(item.distance, specifier: "%.1f") mi")
+                                                            .rescueFont(13, .medium)
+                                                            .foregroundStyle(Theme.secondary)
+                                                    }.lineLimit(1).monospacedDigit()
+                                                }
+                                            }
+                                        }.frame(width: 228, alignment: .leading).padding(10).card(
+                                            radius: 16,
+                                            color: store.cart.contains(item.id)
+                                                ? Theme.soft : Theme.paper)
+                                    }.buttonStyle(.plain).disabled(
+                                        store.runActive || store.cart.contains(item.id)
+                                    ).accessibilityIdentifier("buy-again-\(item.id)")
                                 }
-                            ) { item in
-                                Button {
-                                    if store.reserve(item.id) { Haptic.success() }
-                                } label: {
-                                    HStack(spacing: 12) {
-                                        FoodPhoto(name: item.image).frame(width: 64, height: 64)
-                                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                                        VStack(alignment: .leading, spacing: 6) {
-                                            Text(
-                                                item.name.replacingOccurrences(
-                                                    of: "Organic ", with: ""
-                                                ).replacingOccurrences(of: "Unopened ", with: "")
-                                                    .replacingOccurrences(of: "Ripe ", with: "")
-                                            ).rescueFont(16, .semibold).lineLimit(1)
-                                            if store.cart.contains(item.id) {
-                                                Label("Reserved", systemImage: "checkmark")
-                                                    .rescueFont(14, .medium).foregroundStyle(
-                                                        Theme.save)
-                                            } else {
-                                                HStack(spacing: 8) {
-                                                    Text(Money.text(item.price)).rescueFont(
-                                                        15, .bold
-                                                    )
-                                                    .foregroundStyle(Theme.ink)
-                                                    Text("\(item.distance, specifier: "%.1f") mi")
-                                                        .rescueFont(13, .medium)
-                                                        .foregroundStyle(Theme.secondary)
-                                                }.lineLimit(1).monospacedDigit()
+                            }.padding(.horizontal, 20)
+                        }
+                    }
+                    FeedSection(
+                        title: "Just listed near you", items: feed.sorted { $0.distance < $1.distance }
+                    ) {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(alignment: .top, spacing: 24) {
+                                let nearby = Array(
+                                    feed.filter { $0.distance <= 0.7 }.sorted {
+                                        $0.distance < $1.distance
+                                    }.prefix(9))
+                                ForEach(Array(stride(from: 0, to: nearby.count, by: 3)), id: \.self) {
+                                    start in
+                                    VStack(spacing: 0) {
+                                        ForEach(Array(nearby[start..<min(start + 3, nearby.count)])) {
+                                            item in
+                                            ListingRow(item: item)
+                                            if item.id != nearby[min(start + 2, nearby.count - 1)].id {
+                                                Divider().overlay(Theme.line)
                                             }
                                         }
-                                    }.frame(width: 228, alignment: .leading).padding(10).card(
-                                        radius: 16,
-                                        color: store.cart.contains(item.id)
-                                            ? Theme.soft : Theme.paper)
-                                }.buttonStyle(.plain).disabled(
-                                    store.runActive || store.cart.contains(item.id)
-                                ).accessibilityIdentifier("buy-again-\(item.id)")
-                            }
-                        }.padding(.horizontal, 20)
+                                    }.frame(width: 315)
+                                }
+                            }.padding(.horizontal, 20)
+                        }
                     }
-                }
-                FeedSection(
-                    title: "Just listed near you", items: feed.sorted { $0.distance < $1.distance }
-                ) {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(alignment: .top, spacing: 24) {
-                            let nearby = Array(
-                                feed.filter { $0.distance <= 0.7 }.sorted {
-                                    $0.distance < $1.distance
-                                }.prefix(9))
-                            ForEach(Array(stride(from: 0, to: nearby.count, by: 3)), id: \.self) {
-                                start in
-                                VStack(spacing: 0) {
-                                    ForEach(Array(nearby[start..<min(start + 3, nearby.count)])) {
-                                        item in
-                                        ListingRow(item: item)
-                                        if item.id != nearby[min(start + 2, nearby.count - 1)].id {
-                                            Divider().overlay(Theme.line)
-                                        }
-                                    }
-                                }.frame(width: 315)
-                            }
-                        }.padding(.horizontal, 20)
+                    FeedSection(
+                        title: "Dinner tonight", items: feed.filter { $0.category == "Prepared" }
+                    ) {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 20) {
+                                ForEach(feed.filter { $0.category == "Prepared" }) { item in
+                                    MealCard(item: item)
+                                }
+                            }.padding(.horizontal, 20)
+                        }
                     }
-                }
-                FeedSection(
-                    title: "Dinner tonight", items: feed.filter { $0.category == "Prepared" }
-                ) {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 20) {
-                            ForEach(feed.filter { $0.category == "Prepared" }) { item in
-                                MealCard(item: item)
-                            }
-                        }.padding(.horizontal, 20)
-                    }
-                }
-                FeedSection(
-                    title: "Grab-and-go snacks",
-                    items: feed.filter {
-                        $0.category == "Snacks" || ["bana", "cereal"].contains($0.id)
-                    }
-                ) {
-                    rail(
-                        feed.filter {
+                    FeedSection(
+                        title: "Grab-and-go snacks",
+                        items: feed.filter {
                             $0.category == "Snacks" || ["bana", "cereal"].contains($0.id)
-                        }, width: 164)
-                }
-                FeedSection(title: "Ending soon", items: feed.filter { $0.freshness == .useSoon }) {
-                    rail(feed.filter { $0.freshness == .useSoon }, width: 164, urgency: true)
-                }
-                FeedSection(
-                    title: "Best deals near you", items: feed.sorted { $0.discount > $1.discount }
-                ) {
-                    rail(
-                        Array(feed.sorted { $0.discount > $1.discount }.prefix(6)), width: 164,
-                        deal: true)
+                        }
+                    ) {
+                        rail(
+                            feed.filter {
+                                $0.category == "Snacks" || ["bana", "cereal"].contains($0.id)
+                            }, width: 164)
+                    }
+                    FeedSection(title: "Ending soon", items: feed.filter { $0.freshness == .useSoon }) {
+                        rail(feed.filter { $0.freshness == .useSoon }, width: 164, urgency: true)
+                    }
+                    FeedSection(
+                        title: "Best deals near you", items: feed.sorted { $0.discount > $1.discount }
+                    ) {
+                        rail(
+                            Array(feed.sorted { $0.discount > $1.discount }.prefix(6)), width: 164,
+                            deal: true)
+                    }
                 }
                 if store.isBackend {
-                    if store.catalog.isEmpty {
-                        EmptyState(
-                            title: store.online ? "No food nearby" : "Offline",
-                            message: "Start the local services to browse this account.")
-                    }
                     if !store.feedCursor.isEmpty {
                         Button("Load more food") { Task { await store.loadNextPage() } }.padding()
                             .accessibilityIdentifier("load-more-food")
                     }
-                    Text(store.online ? "Connected local demo" : "Offline · cached browsing").font(
+                    Text(store.online ? "Connected" : "Offline · cached browsing").font(
                         .caption
                     ).padding(.horizontal, 20)
                 }

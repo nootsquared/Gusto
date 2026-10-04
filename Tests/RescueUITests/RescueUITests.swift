@@ -121,13 +121,22 @@ final class RescueUITests: XCTestCase {
 }
 
 extension RescueUITests {
+    func testCloudLaunchRequiresSignIn() {
+        app.terminate()
+        app.launchArguments = ["--uitesting", "--backend"]
+        app.launch()
+        XCTAssertTrue(app.buttons["google-sign-in"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Welcome to Rescue"].exists)
+        XCTAssertFalse(app.buttons["account-demo-buyer"].exists)
+        screenshot("Cloud sign-in")
+    }
     /// Requires MHacksDB, media service and the separate simulator; fixture tests remain independent.
     func testConnectedSellerPublishesBuyerReservesAndPays() throws {
         guard ProcessInfo.processInfo.environment["RESCUE_CONNECTED_TESTS"] == "1" else {
             throw XCTSkip("Enable RESCUE_CONNECTED_TESTS with local services running")
         }
         app.terminate()
-        app.launchArguments = ["--uitesting", "--backend", "--account", "riley"]
+        app.launchArguments = ["--uitesting", "--backend", "--local-backend", "--account", "riley"]
         app.launch()
         app.tabBars.buttons["Sell"].tap()
         if app.buttons["take-photo"].waitForExistence(timeout: 2) { tap("take-photo") }
@@ -148,7 +157,7 @@ extension RescueUITests {
             return
         }
         app.terminate()
-        app.launchArguments = ["--uitesting", "--backend", "--account", "demo-buyer"]
+        app.launchArguments = ["--uitesting", "--backend", "--local-backend", "--account", "demo-buyer"]
         app.launch()
         app.tabBars.buttons["Discover"].tap()
         tap("search")

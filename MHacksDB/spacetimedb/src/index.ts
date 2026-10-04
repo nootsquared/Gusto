@@ -1,6 +1,7 @@
 import { t, type InferSchema, type TransactionCtx, SenderError, Range } from 'spacetimedb/server';
 import db, {scheduledTasks} from './schema';
 import { Identity, ScheduleAt } from 'spacetimedb';
+import { registeredClaims } from './auth';
 export default db;
 export const init = db.init(ctx => { ctx.db.databaseOwner.insert({ id:'owner', identity:ctx.sender }); });
 type Ctx = TransactionCtx<InferSchema<typeof db>>;
@@ -71,7 +72,9 @@ function bumpCart(ctx: Ctx, user: string) {
 function mediaURL(ctx: Ctx, id: string) {
   const link = [...ctx.db.listingMedia.listingId.filter(id)].sort((a, b) => a.order - b.order)[0];
   const media = link && ctx.db.mediaAssets.id.find(link.mediaId);
-  return media?.visibility === 'public' ? `/media/${media.hash}/detail.jpg` : '';
+  if (media?.visibility !== 'public') return '';
+  // Sample photos ship with the iPhone app; real uploaded media uses a hosted reference.
+  return media.key.startsWith('bundle:') ? media.key.slice(7) : `/media/${media.hash}/detail.jpg`;
 }
 function sellerProjection(ctx: Ctx, id: string) {
   const u = ctx.db.users.id.find(id)!;
@@ -492,6 +495,37 @@ export const api = db.procedure({ request: Request }, Result, (ctx, { request })
   } catch(error) { const text=String(error);const code=['unauthorized','not_found','unavailable','expired','stale_version','invalid_transition','service_unavailable','rate_limited'].find(c=>text.includes(c))??'service_unavailable';return {apiVersion:1,serverTime:Number(ctx.timestamp.microsSinceUnixEpoch/1000n),error:code,payload:'{}'}; }
 });
 
+export const registerProfile = db.procedure({ token: t.string() }, Result, (ctx, { token }) => {
+  try {
+    if (!token || token.length > 16000) fail('unauthorized');
+    // HTTP procedure calls do not expose JWT claims through senderAuth in SDK 2.10.
+    // Verify the supplied token belongs to the authenticated caller before inspecting claims.
+    const verified = ctx.http.fetch(
+      `https://maincloud.spacetimedb.com/v1/identity/${ctx.sender.toHexString()}/verify`,
+      { headers: { Authorization: `Bearer ${token}` } });
+    if (verified.status !== 204) fail('unauthorized');
+    const claims = registeredClaims(token, Number(ctx.timestamp.microsSinceUnixEpoch / 1000000n));
+    return ctx.withTx(tx => {
+      const existing = tx.db.userIdentities.identity.find(tx.sender);
+      if (existing) {
+        const user = tx.db.users.id.find(existing.userId);
+        if (!user || user.status !== 'active') fail('unauthorized');
+        return {apiVersion:1,serverTime:now(tx),error:'',payload:json({userId:user.id})};
+      }
+      const id = uid(tx);
+      tx.db.users.insert({id,name:claims.name,avatar:'',status:'active',created:stamp(tx)});
+      tx.db.userIdentities.insert({identity:tx.sender,userId:id});
+      tx.db.userPreferences.insert({userId:id,vegetarian:false,area:'',smartAlerts:false,version:1});
+      tx.db.carts.insert({userId:id,version:1,updated:stamp(tx)});
+      tx.db.sellerStats.insert({userId:id,ratingTotal:0,ratingCount:0,completed:0});
+      tx.db.notificationPreferences.insert({userId:id,messages:true,pickups:true,discovery:false});
+      return {apiVersion:1,serverTime:now(tx),error:'',payload:json({userId:id})};
+    });
+  } catch {
+    return {apiVersion:1,serverTime:Number(ctx.timestamp.microsSinceUnixEpoch/1000n),error:'unauthorized',payload:'{}'};
+  }
+});
+
 export const completePayment = db.procedure({ attemptId:t.string(), succeeded:t.bool(), reference:t.string() }, Result, (ctx,q)=>ctx.withTx(tx=>{
   simulator(tx,'payment');const p=tx.db.paymentAttempts.id.find(q.attemptId);if(!p)fail('not_found');
   if(p.status==='succeeded' && (!q.succeeded || p.provider!==q.reference))fail('stale_version');
@@ -539,10 +573,19 @@ export const bindDemoIdentity = db.procedure({identity:t.string(),userId:t.strin
 import fixtures from './fixtures';
 export const seed = db.procedure({ assets:t.string(),count:t.u32() },t.unit(),(ctx,q)=>ctx.withTx(tx=>{
   owner(tx);if(!tx.db.configuration.id.find('runtime')?.local)fail('unauthorized');
-  if(tx.db.seedVersions.id.find('rescue-v1'))return {};
-  if(q.count<200||q.count>20000)fail('invalid_transition');
+  seedCatalog(tx,q.assets,q.count,false);return {};
+}));
+
+// Catalog-only cloud provisioning never enables local services or binds demo identities.
+export const seedCloudCatalog = db.procedure(t.unit(),ctx=>ctx.withTx(tx=>{
+  owner(tx);seedCatalog(tx,'{}',200,true);return {};
+}));
+function seedCatalog(tx: Ctx, assetJSON: string, count: number, cloud: boolean) {
+  const version=cloud?'rescue-cloud-catalog-v1':'rescue-v1';
+  if(tx.db.seedVersions.id.find(version))return;
+  if(count<200||count>20000)fail('invalid_transition');
   for (const tag of [{id:'vegetarian',label:'Vegetarian',kind:'dietary'},{id:'milk',label:'Milk',kind:'allergen'},{id:'wheat',label:'Wheat',kind:'allergen'}])tx.db.tags.insert(tag);
-  const assets=JSON.parse(q.assets) as Record<string,{hash:string;key:string;width:number;height:number}>;
+  const assets=JSON.parse(assetJSON) as Record<string,{hash:string;key:string;width:number;height:number}>;
   const names=['Maya Chen','Alex Rivera','Nina Park','Jordan Reed','Sam Patel','You','Riley Green','Casey Bell','Avery Brooks','Taylor Lane','Morgan Lee','Jamie Kim'];
   const ids=['maya','alex','nina','jordan','sam','demo-buyer','riley','casey','avery','taylor','morgan','jamie'];
   for(let i=0;i<ids.length;i++){
@@ -554,17 +597,17 @@ export const seed = db.procedure({ assets:t.string(),count:t.u32() },t.unit(),(c
     tx.db.pickupLocations.insert({id:`location-${id}`,sellerId:id,area:id==='nina'?'North Campus':'Linden Park',
       latitude:42.28+(i%4)*0.002,longitude:-83.74+Math.floor(i/4)*0.002,
       exactLatitude:42.2802+(i%4)*0.002,exactLongitude:-83.7402+Math.floor(i/4)*0.002,
-      address:`${100+i} Demo Lane (fictional)`,instructions:'Local demo pickup · meet at the front door'});
+      address:`${100+i} Demo Lane (fictional)`,instructions:cloud?'Sample pickup location (fictional)':'Local demo pickup · meet at the front door'});
   }
-  for(let i=0;i<q.count;i++){
+  for(let i=0;i<count;i++){
     const f=fixtures[i%fixtures.length],id=i<fixtures.length?f.id:`listing-${String(i).padStart(5,'0')}`;
     let sellerId=i<fixtures.length?f.sellerID:ids[i%ids.length];
-    if(i>=q.count-3 && sellerId==='demo-buyer')sellerId='maya';
-    const row=tx.db.listings.insert({id,sellerId,title:i<fixtures.length?f.name:`${f.name} · package ${i+1}`,description:'Local demo food package',
+    if(i>=count-3 && sellerId==='demo-buyer')sellerId='maya';
+    const row=tx.db.listings.insert({id,sellerId,title:i<fixtures.length?f.name:`${f.name} · package ${i+1}`,description:cloud?'Sample food package (fictional)':'Local demo food package',
       category:f.category,quantity:f.quantity,price:f.price+(i<fixtures.length?0:i%5*25),retail:f.retail,grams:Math.round(f.weight*453.59237),
       freshness:f.freshness,opened:f.opened,prepared:f.prepared,storage:f.storage,allergens:f.allergens,vegetarian:f.vegetarian,
-      purchased:'Today',bestBy:'',status:i===q.count-1?'archived':i>=q.count-3?'sold':'published',area:'Linden Park',version:1,created:stamp(tx)-BigInt(i*1000),creationOrder:9007199254740991n-stamp(tx)+BigInt(i*1000),updated:stamp(tx)-BigInt(i*60000)});
-    const a=assets[f.id];if(a){const mediaId=i<fixtures.length?`seed-${f.id}`:`media-${id}`;
+      purchased:'Today',bestBy:'',status:i===count-1?'archived':i>=count-3?'sold':'published',area:'Linden Park',version:1,created:stamp(tx)-BigInt(i*1000),creationOrder:9007199254740991n-stamp(tx)+BigInt(i*1000),updated:stamp(tx)-BigInt(i*60000)});
+    const a=cloud?{hash:`bundled-${f.id}`,key:`bundle:${f.id}`,width:0,height:0}:assets[f.id];if(a){const mediaId=i<fixtures.length?`seed-${f.id}`:`media-${id}`;
       tx.db.mediaAssets.insert({id:mediaId,ownerId:sellerId,key:a.key,hash:a.hash,mime:'image/jpeg',width:a.width,height:a.height,visibility:'public',state:'ready',created:stamp(tx)});
       tx.db.listingMedia.insert({id:`cover-${id}`,listingId:id,mediaId:mediaId,role:'cover',order:0});}
     tx.db.listingPickupWindows.insert({id:`window-${id}`,listingId:id,locationId:`location-${sellerId}`,
@@ -573,9 +616,9 @@ export const seed = db.procedure({ assets:t.string(),count:t.u32() },t.unit(),(c
     if(row.vegetarian)tx.db.listingTags.insert({id:`${id}:vegetarian`,listingId:id,tagId:'vegetarian'});
     if(row.allergens.toLowerCase().includes('milk'))tx.db.listingTags.insert({id:`${id}:milk`,listingId:id,tagId:'milk'});
     indexListing(tx,row);
-    if(row.status==='sold'){
+    if(!cloud && row.status==='sold'){
       const buyerId='demo-buyer',runId=`seed-run-${i}`,stopId=`seed-stop-${i}`,reservationId=`seed-reservation-${i}`,paymentId=`seed-payment-${i}`,receiptId=`seed-receipt-${i}`;
-      const completed=stamp(tx)-BigInt((q.count-i)*86400000);
+      const completed=stamp(tx)-BigInt((count-i)*86400000);
       tx.db.pickupRuns.insert({id:runId,buyerId,mode:'Fastest',status:'closed',phase:'idle',currentStop:0,version:1,created:completed});
       tx.db.pickupStops.insert({id:stopId,runId,buyerId,sellerId,locationId:`location-${sellerId}`,sequence:0,proposed:completed,windowEnd:completed,status:'paid',phase:'rescued'});
       tx.db.reservations.insert({id:reservationId,listingId:id,buyerId,sellerId,status:'paid',expires:completed,listingVersion:1,price:row.price});
@@ -591,13 +634,16 @@ export const seed = db.procedure({ assets:t.string(),count:t.u32() },t.unit(),(c
       }
     }
   }
+  if(!cloud){
   process(tx,'casey',{action:'reserve',operationId:'seed-cart',resourceId:'listing-00035',text:'',version:0,value:0,enabled:false,cursor:''});
   process(tx,'jamie',{action:'draft',operationId:'seed-draft',resourceId:'',text:'',version:0,value:0,enabled:false,cursor:''});
   for(const seller of ['maya','alex']){const c=conversation(tx,'demo-buyer',seller);sendMessage(tx,seller,c.id,'Welcome! This is a persistent local demo conversation.','seed');}
   tx.db.favorites.insert({id:'demo-buyer:straw',userId:'demo-buyer',listingId:'straw'});
   tx.db.follows.insert({id:'demo-buyer:category:Produce',userId:'demo-buyer',kind:'category',target:'Produce'});
-  tx.db.seedVersions.insert({id:'rescue-v1',installed:stamp(tx),count:q.count});return {};
-}));
+  }
+  tx.db.seedVersions.insert({id:version,installed:stamp(tx),count});
+}
+
 export const simulatorWork = db.procedure(t.string(),ctx=>ctx.withTx(tx=>{
   const role=tx.db.servicePrincipals.identity.find(tx.sender)?.role;
   if(!role)fail('unauthorized');simulator(tx,role);
