@@ -38,7 +38,12 @@ public enum RepositoryError: Error, LocalizedError {
     case offline, invalidResponse
     public var errorDescription: String? {
         switch self {
-        case .server(let code): return code.replacingOccurrences(of: "_", with: " ")
+        case .server(let code):
+            if code == "gemini_billing_required" { return "Gemini needs credits added to the project's billing account" }
+            if code == "gemini_not_configured" { return "Gemini hasn't been configured on this server yet" }
+            if code == "gemini_unavailable" { return "Gemini is unavailable right now" }
+            if code == "invalid_analysis" { return "Gemini couldn't confidently read the food details" }
+            return code.replacingOccurrences(of: "_", with: " ")
         case .offline: return "Offline. This action needs a server response."
         case .invalidResponse: return "The server returned an unsupported response."
         }
@@ -58,6 +63,16 @@ public protocol RescueRepository: Sendable {
 public struct BackendUser: Codable, Sendable {
     public let id: String
     public let name: String
+    public var avatar: String? = nil
+}
+public struct SellerPickupRequest: Codable, Identifiable, Sendable {
+    public let id: String
+    public let buyerId: String
+    public let buyerName: String
+    public let proposed: Double
+    public let status: String
+    public let phase: String
+    public let items: [Listing]
 }
 public struct BackendPreferences: Codable, Sendable {
     public let vegetarian: Bool
@@ -158,6 +173,7 @@ public struct BackendBootstrap: Codable, Sendable {
     public let conversations: [BackendConversation]
     public let simulation: Bool
     public let follows: [BackendFollow]?
+    public var pickupRequests: [SellerPickupRequest]? = nil
     public mutating func stripPrivateLocations(at time: Double) {
         if let current = run {
             // Exact pickup data is never persisted. Online projections alone can unlock it.

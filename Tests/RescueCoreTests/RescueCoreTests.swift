@@ -22,7 +22,8 @@ import XCTest
         let store = makeStore()
         let seller = store.sellers.first!
         store.updateBrowseLocation(latitude: seller.latitude, longitude: seller.longitude)
-        XCTAssertEqual(store.catalog.first { $0.sellerID == seller.id }!.distance, 0, accuracy: 0.001)
+        XCTAssertEqual(
+            store.catalog.first { $0.sellerID == seller.id }!.distance, 0, accuracy: 0.001)
         store.updateBrowseLocation(latitude: 0, longitude: 0)
         XCTAssertTrue(store.visibleListings(query: "").isEmpty)
         let distances = store.catalog.map(\.distance)
@@ -30,6 +31,61 @@ import XCTest
         XCTAssertEqual(store.catalog.map(\.distance), distances)
     }
 
+    func testWiderBrowseAreaRespectsOtherFiltersAndNeverOffersDistantFood() {
+        let store = makeStore()
+        store.filters.distance = 0.8
+        store.catalog = Array(store.catalog.prefix(1))
+        store.catalog[0].distance = 1.2
+        XCTAssertTrue(store.visibleListings(query: "").isEmpty)
+        XCTAssertEqual(store.suggestedBrowseRadius, 1.5)
+        store.filters.maxPrice = 0
+        XCTAssertNil(store.suggestedBrowseRadius)
+        store.filters = Filters()
+        store.filters.distance = 0.8
+        store.catalog[0].distance = 2.5
+        XCTAssertEqual(store.suggestedBrowseRadius, 3)
+        store.filters.distance = 3
+        XCTAssertFalse(store.visibleListings(query: "").isEmpty)
+        XCTAssertNil(store.suggestedBrowseRadius)
+        store.filters = Filters()
+        store.catalog[0].distance = 50
+        XCTAssertNil(store.suggestedBrowseRadius)
+    }
+
+    func testListingPickupCoordinatesOverrideSellersFirstAddress() {
+        let store = makeStore()
+        store.catalog[0].latitude = 0
+        store.catalog[0].longitude = 0
+        store.updateBrowseLocation(latitude: 0, longitude: 0)
+        XCTAssertEqual(store.catalog[0].distance, 0, accuracy: 0.001)
+        XCTAssertTrue(store.visibleListings(query: "").contains { $0.id == store.catalog[0].id })
+    }
+    func testRepeatedSamplesCollapseWithoutHidingGenuineOffers() throws {
+        let original = makeStore().listing("bread")!
+        var fields = try JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as! [String: Any]
+        fields["id"] = "listing-00021"
+        fields["name"] = original.name + " · package 22"
+        fields["imageURL"] = "bread"
+        fields["distance"] = 0.1
+        let sample = try JSONDecoder().decode(Listing.self, from: JSONSerialization.data(withJSONObject: fields))
+        fields["id"] = "rescue-1000"
+        let genuine = try JSONDecoder().decode(Listing.self, from: JSONSerialization.data(withJSONObject: fields))
+        let results = makeStore().distinctSampleListings([original, sample, genuine])
+        XCTAssertEqual(results.map(\.id), [sample.id, genuine.id])
+        XCTAssertEqual(results[0].name, original.name)
+    }
+    func testReorderingStopsIsBlockedOnceRequestsAreSent() async {
+        let store = makeStore()
+        reserveDemo(store)
+        store.makePlan()
+        let first = store.plan!.stops[0].id
+        await store.movePickupStop(first, by: 1)
+        XCTAssertEqual(store.plan!.stops[1].id, first)
+        await store.coordinate()
+        let order = store.plan!.stops.map(\.id)
+        await store.movePickupStop(first, by: -1)
+        XCTAssertEqual(store.plan!.stops.map(\.id), order)
+    }
     func testExactSourceCatalogAndIntegerTotals() async {
         let store = makeStore()
         reserveDemo(store)
@@ -217,7 +273,7 @@ import XCTest
         let results = store.visibleListings(query: "snacks under $2")
         XCTAssertFalse(results.isEmpty)
         XCTAssertTrue(
-            results.allSatisfy { $0.category == "Snacks" && $0.price < 200 && $0.distance <= 0.8 })
+            results.allSatisfy { $0.category == "Snacks" && $0.price < 200 && $0.distance <= 3.0 })
         store.filters.categories = ["Bakery"]
         XCTAssertEqual(store.visibleListings(query: "").map(\.id), ["bread"])
         store.filters.distance = 0.2
@@ -225,6 +281,8 @@ import XCTest
     }
     func testDistanceFilterCanExpandWithoutHiddenShortcut() {
         let store = makeStore()
+        XCTAssertTrue(store.visibleListings(query: "").contains { $0.id == "gran" })
+        store.filters.distance = 0.8
         XCTAssertFalse(store.visibleListings(query: "").contains { $0.id == "gran" })
         store.filters.distance = 1.2
         XCTAssertTrue(store.visibleListings(query: "").contains { $0.id == "gran" })
@@ -232,7 +290,7 @@ import XCTest
         XCTAssertFalse(store.visibleListings(query: "").contains { $0.id == "gran" })
         XCTAssertTrue(store.visibleListings(query: "").contains { $0.id == "bread" })
         store.filters = Filters()
-        XCTAssertEqual(store.filters.distance, 0.8)
+        XCTAssertEqual(store.filters.distance, 3.0)
     }
     func testFreshCheckAndChatStayWithCorrectSeller() async {
         let store = makeStore()

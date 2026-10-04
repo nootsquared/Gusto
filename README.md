@@ -3,11 +3,26 @@
 SwiftUI iPhone app for rescuing food, iOS 17+. Normal launches select the Maincloud database
 `mhacks-pranav-dev-975fp`. Sign in through SpacetimeAuth using Google. First sign-in
 creates a server-authorized profile; returning users retain the same account.
+Scans save to private cloud inventory; **Sell this item → List on Gusto** publishes them for
+other signed-in users. Foreground browsing refreshes all marketplace pages about every ten
+seconds, and pulling down refreshes immediately. Nearby starts at 3 miles; filters and the map
+viewport determine which published items appear. Both phones must use a normal cloud build,
+not `--uitesting` fixtures or `--local-backend` accounts.
 Debug launches with `--local-backend` use the local SpacetimeDB backend with separate
 accounts, authorized reservations, persistent messaging, seller publishing,
 pickup/payment simulation, and receipt-derived impact. Browsing survives temporary disconnection
 through account-scoped caches. Camera, AI, cloud uploads, actual payments,
-push and directions remain future providers.
+push remain future providers. Pickup routes use Apple Maps from your selected location, with
+road directions available through Apple Maps. Plans choose an order automatically; you can move
+stops before sending requests. Sellers confirm requests in Messages before buyers start pickups.
+Seed sellers are sample accounts and cannot reply. Actual payment processing remains unconfigured.
+
+Google account pictures appear in You and the tab bar when SpacetimeAuth provides a photo.
+An expired session keeps the account and current screen. Token renewal clears reconnect prompts; transient failures never sign you out.
+
+Gemini scanning, reviewed collection-to-sale publishing and sensor-linked quality estimates are
+implemented; see [Gemini scan setup](docs/GEMINI_SCAN_SETUP.md) for server-key configuration and
+the two-phone demo. The shared backend is deployed with Gemini configured; local core, backend, Simulator and iPhone build checks passed.
 
 Start the four local development processes in [MHacksDB/README.md](MHacksDB/README.md),
 then run the app in Simulator with the `--local-backend` launch argument.
@@ -33,7 +48,7 @@ Physical-device signing/install requires your Apple account and connected hardwa
 ## Fixture-mode hackathon demo
 
 1. Discover → Organic Strawberries → Reserve. Close the sheet.
-2. Add Greek Yogurt from Buy again, then use Search for Sourdough Loaf and Rigatoni. Reserve both. The default 0.8mi distance filter includes all four. Filters next to Search combines budget, pickup time, freshness and preferences in one sheet.
+2. Add Greek Yogurt from Buy again, then use Search for Sourdough Loaf and Rigatoni. Reserve both. The default 3mi distance filter includes all four. Filters next to Search combines budget, pickup time, freshness and preferences in one sheet.
 3. Cart shows **4 items, 4 sellers, $7.75 to pay, $14.63 saved, 6.1 lb**. These figures come from the source fixtures.
 4. Plan My Pickups → choose a route preference → Coordinate All.
 5. Accept Nina's later pickup time (or Alternative). Downstream stop times update.
@@ -84,10 +99,12 @@ Adding food to your cart saves it without reserving inventory or contacting sell
 
 ## Scan and private food collection
 
-The middle tab is **Scan**. Capture a camera photo or choose one through Apple's photo picker, review the on-device food suggestion, and save a private inventory item. Apple Vision can suggest common foods; variety, condition and quantity require review. No Gemini key is bundled in the app. Gemini extraction remains an integration step after a server endpoint/project is supplied.
+The middle tab is **Scan**. Capture a camera photo or choose one through Apple's photo picker, review Gemini's food, variety, visible condition and quantity suggestions, and save a private inventory item. Confident food bounds offer a crop with a full-photo restore option. Analysis runs through the authenticated server; no Gemini key is bundled in the app. Manual entry remains available if analysis fails.
 
-Items and compressed JPEGs persist in private Maincloud `food_inventory` records. This prototype limits each account to 50 items and each image to 65 KB; a production photo pipeline should use your Google Cloud Storage bucket. Only explicit **Sell this item** publishes its photo and creates a marketplace listing after price, allergens, a selected map address, pickup dates and four individual attestations. The app never calls AI output verified.
+Items and compressed JPEGs persist in private Maincloud `food_inventory` records. This prototype limits each account to 50 items and each image to 65 KB; a production photo pipeline should use your Google Cloud Storage bucket. Only explicit **Sell this item** publishes its photo and creates a marketplace listing after price, allergens, a selected map address, pickup dates and four individual attestations. The app never calls AI output verified. Pickup location defaults to a recent precise location or your saved choice; use current location or select a live address match as you type. The pickup pin uses your selected coordinates. Tracked items attach recorded storage averages to their listing.
 
-The sensor panel supports Bluetooth discovery, connection and disconnection. It does not interpret unknown characteristics. Firmware service/characteristic UUIDs, packet shape and units are needed for live ingestion. The authenticated `sensor_reading` API accepts Celsius, percent relative humidity and lux and retains up to 500 samples per account. Recent summaries use matching item/device samples from the last three days, after the scan date; absent measurements remain blank. Bluetooth pairing alone does not mean monitoring is active.
+Scan → Storage sensor connects to the Nano `MHacks Climate` service using the exact UUIDs and 17-byte binary protocol in [Developer/BLE_PROTOCOL.md](Developer/BLE_PROTOCOL.md). Hold FREE-WILi blue for two seconds, tap Find a device, select MHacks Climate, and allow Bluetooth access. The app reads the current characteristic and subscribes to once-per-second notifications. Its live dashboard displays °F (with °C), % relative humidity, and raw APDS9960 clear-channel counts. Missing validity bits display dashes; after five seconds without a new sample all readings are hidden as stale. Disconnect stops monitoring; closing the panel leaves the foreground connection active. A physical iPhone is required for the radio check; the Simulator shows an explicit device requirement.
 
-There is no calibrated expiry model yet. Storage references for tomatoes and Cavendish bananas link to UC Davis; these are handling guides, not safety/expiry predictions. Without a sensor, scanning and selling still work, with no fabricated tracking values.
+Tick **Track with sensor** on a collection item to record valid BLE history privately about once a minute. Temperature is converted to Celsius; raw light counts remain explicitly raw and are never mixed with lux. Recent temperature/humidity history supports a provisional remaining-quality estimate. Background recording depends on iOS notification delivery and a connected sensor. See [physical iPhone setup and other-phone installation](docs/IPHONE_SENSOR_SETUP.md).
+
+The remaining-quality model is uncalibrated and does not establish a food-safety expiration date. See [Gemini scan setup](docs/GEMINI_SCAN_SETUP.md) for its assumptions. Without a sensor, scanning and selling still work, with no fabricated tracking values.

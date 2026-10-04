@@ -9,7 +9,7 @@ const bootstrap=await good(buyer,'bootstrap');assert.equal(bootstrap.user.id,'de
 let page=await good(buyer,'feed',{text:'{}'});assert.equal(page.listings.length,30);
 assert(page.candidateScans<=500);
 const seen=new Set(page.listings.map(l=>l.id));while(page.cursor){page=await good(buyer,'feed',{text:'{}',cursor:page.cursor});assert(page.candidateScans<=500);for(const l of page.listings){assert(!seen.has(l.id));seen.add(l.id);}}
-assert.equal(seen.size,Number(process.env.RESCUE_SEED_COUNT||200)-3);console.log('PASS: authenticated bootstrap and 200-row pagination');
+assert.equal(seen.size,Number(process.env.RESCUE_SEED_COUNT||200)-3-bootstrap.ownListings.filter(l=>l.available).length);console.log('PASS: authenticated bootstrap and 200-row pagination');
 const invalid=await api((await identity()).token,'bootstrap');assert.equal(invalid.error,'unauthorized');
 for(const token of [buyer,other]){
   const sql=await fetch(`${server}/v1/database/${database}/sql`,{method:'POST',headers:{Authorization:`Bearer ${token}`},body:'SELECT * FROM pickup_locations'});assert.notEqual(sql.status,200);
@@ -42,6 +42,23 @@ const foodListing=await good(other,'inventory_publish',{resourceId:foodID,text:J
 assert.equal((await good(other,'inventory')).items.find(i=>i.id===foodID).listingID,foodListing.id);
 const listedFood=(await good(buyer,'search',{text:JSON.stringify({query:'Roma Tomato'})})).listings.find(l=>l.id===foodListing.id);
 assert(listedFood);assert.equal(listedFood.imageURL,'data:image/jpeg;base64,'+food.photoBase64);
+assert.equal(listedFood.latitude,listingReview.latitude);
+assert.equal(listedFood.longitude,listingReview.longitude);
+assert.equal(listedFood.storageConditions.sampleCount,1);
+assert.equal(listedFood.storageConditions.temperature,22);
+assert.equal(listedFood.storageConditions.humidity,56);
+assert(!(await good(other,'search',{text:JSON.stringify({query:'Roma Tomato'})})).listings.some(l=>l.id===foodListing.id));
+assert.equal((await api(other,'add_cart',{resourceId:foodListing.id,operationId:op()})).error,'unavailable');
+const freshOp=op();
+const fresh=await good(buyer,'freshness',{resourceId:foodListing.id,operationId:freshOp});
+await good(buyer,'freshness',{resourceId:foodListing.id,operationId:freshOp});
+await good(buyer,'freshness',{resourceId:foodListing.id,operationId:op()});
+const freshMessages=(await good(other,'messages',{resourceId:'demo-buyer:riley'})).messages.filter(m=>m.text.includes('Fresh Check for Roma Tomato'));
+assert.equal(freshMessages.length,1);
+assert.equal(freshMessages[0].senderId,'demo-buyer');
+assert.equal((await api(other,'freshness',{resourceId:foodListing.id,operationId:op()})).error,'unavailable');
+console.log('PASS: exact pickup coordinates, recorded storage snapshot, own listings excluded, Fresh Check seller message and duplicate protection');
+
 assert.equal((await api(other,'inventory_publish',{resourceId:foodID,text:JSON.stringify(listingReview),operationId:op()})).error,'invalid_transition');
 await good(other,'inventory_unlist',{resourceId:foodID,operationId:op()});
 assert(!(await good(buyer,'search',{text:JSON.stringify({query:'Roma Tomato'})})).listings.some(l=>l.id===foodListing.id));
@@ -69,6 +86,29 @@ assert.equal((await good(buyer,'bootstrap')).reservations.length,0);
 for(const token of [buyer,other]) await good(token,'release',{resourceId:'straw',operationId:op()});
 await good(buyer,'release',{resourceId:'yog',operationId:op()});
 console.log('PASS: saved carts have no holds, confirmation reserves, and failed confirmation rolls back');
+// Phone origin, explicit reorder, seller-visible requests and repeat-send guards.
+for(const id of ['bread','pasta'])await good(buyer,'add_cart',{resourceId:id,operationId:op()});
+assert.equal((await api(buyer,'plan',{text:JSON.stringify({latitude:999,longitude:0}),operationId:op()})).error,'invalid_transition');
+const origin={latitude:42.29,longitude:-83.73,mode:'Fastest'};
+let ordered=await good(buyer,'plan',{text:JSON.stringify(origin),operationId:op()});
+assert.equal(ordered.stops.length,2);
+const order=ordered.stops.map(s=>s.id).reverse();
+ordered=await good(buyer,'reorder_plan',{resourceId:ordered.id,text:JSON.stringify({...origin,order}),operationId:op()});
+assert.deepEqual(ordered.stops.map(s=>s.id),order);
+await good(buyer,'coordinate',{resourceId:ordered.id,operationId:op()});
+const before=(await good(account(ordered.stops[0].seller.id),'messages',{resourceId:[ordered.stops[0].seller.id,'demo-buyer'].sort().join(':')})).messages.length;
+await good(buyer,'coordinate',{resourceId:ordered.id,operationId:op()});
+assert.equal((await good(account(ordered.stops[0].seller.id),'messages',{resourceId:[ordered.stops[0].seller.id,'demo-buyer'].sort().join(':')})).messages.length,before);
+assert.equal((await api(buyer,'reorder_plan',{resourceId:ordered.id,text:JSON.stringify({...origin,order:order.toReversed()}),operationId:op()})).error,'invalid_transition');
+for(const stop of ordered.stops){
+ const sellerToken=account(stop.seller.id);
+ assert((await good(sellerToken,'bootstrap')).pickupRequests.some(r=>r.id===stop.id&&r.buyerId==='demo-buyer'));
+ await good(sellerToken,'confirm',{resourceId:stop.id,operationId:op()});
+}
+assert((await good(buyer,'bootstrap')).run.stops.every(s=>s.status==='confirmed'));
+for(const id of ['bread','pasta'])await good(buyer,'release',{resourceId:id,operationId:op()});
+console.log('PASS: phone origin, reordered pickup route, seller request controls and duplicate coordination guard');
+
 
 // Different operation IDs compete for the same inventory claim.
 const race=await Promise.all([api(buyer,'reserve',{resourceId:'straw',operationId:op()}),api(other,'reserve',{resourceId:'straw',operationId:op()})]);

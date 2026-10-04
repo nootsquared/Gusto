@@ -66,6 +66,25 @@ struct FoodPhoto: View {
     }
 }
 
+struct AccountAvatar: View {
+    @Environment(AppStore.self) private var store
+    var size: CGFloat = 32
+    var body: some View {
+        Group {
+            if let avatar = store.profileAvatar, !avatar.isEmpty {
+                FoodPhoto(name: avatar)
+            } else if !store.isBackend {
+                FoodPhoto(name: "profile")
+            } else {
+                Text(String(store.profileName.prefix(1)).uppercased())
+                    .font(.system(size: size * 0.4, weight: .semibold))
+                    .foregroundStyle(Theme.save).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Theme.soft)
+            }
+        }.frame(width: size, height: size).clipShape(Circle())
+    }
+}
+
 struct Avatar: View {
     let seller: Seller
     var size: CGFloat = 36

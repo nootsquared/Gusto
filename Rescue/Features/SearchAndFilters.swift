@@ -94,8 +94,9 @@ struct FiltersView: View {
             Section("Seller") {
                 Picker("Minimum rating", selection: $store.filters.minimumRating) {
                     Text("Any").tag(0.0)
-                    Text("4.5+").tag(4.5)
-                    Text("4.8+").tag(4.8)
+                    Text("3 stars+").tag(3.0)
+                    Text("4 stars+").tag(4.0)
+                    Text("5 stars").tag(5.0)
                 }
             }
         }.scrollContentBackground(.hidden).tint(Theme.sage).navigationTitle("Filters")

@@ -27,6 +27,7 @@ struct BrowseLocation: Codable, Equatable {
     private let geocoder = CLGeocoder()
     private var search: MKLocalSearch?
     private var lookupGeneration = UUID()
+    private var fixTimeout: Task<Void, Never>?
     private let defaultsKey = "gusto.manual-browse-location"
 
     override init() {
@@ -46,8 +47,8 @@ struct BrowseLocation: Codable, Equatable {
             preferences.set(true, forKey: "gusto.location-choice-v2")
         }
         manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
-        manager.distanceFilter = 250
+        manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+        manager.distanceFilter = 25
     }
     var label: String {
         if usingGPS { return "Current location" }
@@ -59,14 +60,32 @@ struct BrowseLocation: Codable, Equatable {
         preferences.removeObject(forKey: defaultsKey)
         usingGPS = true
         preferences.set(true, forKey: "gusto.use-gps")
-        locating = true
+        locating = selection == nil
         message = nil
         switch manager.authorizationStatus {
         case .notDetermined: manager.requestWhenInUseAuthorization()
-        case .authorizedAlways, .authorizedWhenInUse: manager.startUpdatingLocation()
+        case .authorizedAlways, .authorizedWhenInUse: startGPS()
         default:
             locating = false
             message = "Location access is off. Choose a place below or enable it in Settings."
+        }
+    }
+    private func startGPS() {
+        fixTimeout?.cancel()
+        // Reuse a fresh system fix; resuming an unchanged location may emit no new callback.
+        if let cached = manager.location, cached.horizontalAccuracy >= 0, cached.horizontalAccuracy <= 100,
+           abs(cached.timestamp.timeIntervalSinceNow) < 60 {
+            locationManager(manager, didUpdateLocations: [cached])
+        }
+        manager.startUpdatingLocation()
+        if locating {
+            manager.requestLocation()
+            fixTimeout = Task { @MainActor [weak self] in
+                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                guard let self, self.usingGPS, self.locating else { return }
+                self.locating = false
+                self.message = "Couldn't get a precise location. Enable Precise Location in Settings or search an address."
+            }
         }
     }
     func requestInitially() {
@@ -77,11 +96,15 @@ struct BrowseLocation: Codable, Equatable {
     func resume() {
         if usingGPS { useCurrentLocation() }
     }
-    func pause() { manager.stopUpdatingLocation() }
+    func pause() {
+        fixTimeout?.cancel()
+        locating = false
+        manager.stopUpdatingLocation()
+    }
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         guard usingGPS else { return }
         switch manager.authorizationStatus {
-        case .authorizedAlways, .authorizedWhenInUse: manager.startUpdatingLocation()
+        case .authorizedAlways, .authorizedWhenInUse: startGPS()
         case .denied, .restricted:
             locating = false
             message = "Location access is off. You can choose a place instead."
@@ -89,11 +112,13 @@ struct BrowseLocation: Codable, Equatable {
         }
     }
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard usingGPS, let location = locations.last, location.horizontalAccuracy >= 0,
+        guard usingGPS, let location = locations.last, location.horizontalAccuracy >= 0, location.horizontalAccuracy <= 100,
               abs(location.timestamp.timeIntervalSinceNow) < 60 else { return }
+        fixTimeout?.cancel()
         locating = false
+        message = nil
         if let old = selection,
-           CLLocation(latitude: old.latitude, longitude: old.longitude).distance(from: location) < 250 {
+           CLLocation(latitude: old.latitude, longitude: old.longitude).distance(from: location) < 25 {
             return
         }
         let generation = UUID()
@@ -112,6 +137,7 @@ struct BrowseLocation: Codable, Equatable {
         }
     }
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        fixTimeout?.cancel()
         locating = false
         message = "Couldn't find your location. Try again or choose a place."
     }
@@ -143,6 +169,7 @@ struct BrowseLocation: Codable, Equatable {
         if search === operation { searching = false }
     }
     func select(_ item: MKMapItem) {
+        fixTimeout?.cancel()
         usingGPS = false
         preferences.set(false, forKey: "gusto.use-gps")
         manager.stopUpdatingLocation()

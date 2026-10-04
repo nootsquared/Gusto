@@ -17,7 +17,18 @@ Views compose reusable components from `Rescue/Components` and `Theme`. Colors a
 
 `Theme.configureTabBar` supplies the opaque Paper system bar and Apricot unread badge at launch; both standard and scroll-edge appearances match. `BottomAction` extends its background through the home-indicator safe area. Map listing positions preserve the Make export's x/y values, projected into a fixed fictional MapKit region; route stops use the mock sellers' coordinates.
 
-Filters are owned solely by `AppStore.filters`; the former `selectedPill` shortcut layer has been removed. Nearby is the default 0.8mi distance, and price/freshness/time/preferences use their existing model fields. Changing distance can expand results beyond the initial radius without a hidden shortcut cap.
+Filters are owned solely by `AppStore.filters`; the former `selectedPill` shortcut layer has been removed. Nearby is the default 3mi distance, and price/freshness/time/preferences use their existing model fields. Changing distance can expand results beyond the initial radius without a hidden shortcut cap.
+
+Discover shows one actionable empty-area state when filters hide the catalog. Wider-area suggestions
+respect all other filters and use the existing 1.5mi/3mi choices; they never silently change GPS or
+show distant listings as nearby. Cloud recommendations apply filters before selecting their top ten.
+The map's empty state offers an explicit wider viewport and reloads that area from the backend.
+
+Foreground marketplace refresh polls a complete paginated cloud snapshot about every ten seconds,
+using the selected browse coordinates. It replaces stale published rows only after every page
+succeeds, preserving unavailable cart/detail context. This is HTTP polling, not a database
+subscription; background delivery is not implemented. Scanned inventory remains private until
+`inventory_publish` succeeds, then the publisher immediately refreshes inventory and marketplace.
 
 ## Product invariants
 
@@ -150,10 +161,48 @@ Gusto consumer copy refers to pickup plans, pickup trips, and purchases. The exi
 
 ## Scan ownership and hardware boundary
 
-`FoodScanController` owns transient image review and on-device Vision classification. Camera and scan sheets use the root modal host. `AppStore.inventory` and `storageReadings` own product state, clear on account changes, and load through the authenticated repository. Private photos remain private until the atomic `inventory_publish` action creates the listing, pickup location/window, public media reference and seller attestations. `inventory_unlist` archives the linked listing and returns the item to the private collection; claimed/sold listings cannot be removed. Inventory reads and edits are scoped to `ctx.sender`'s registered account.
+`FoodScanController` owns transient image review. Authenticated builds send a bounded JPEG through `AppStore.analyzeFoodPhoto` to the server's Gemini procedure; fixture builds retain on-device Vision. The server keeps its key in an owner-configured private table, validates structured food metadata, and limits analysis requests. Analysis does not save or publish anything. A confident bounding box offers a rectangular crop with a full-photo restore option. Camera and scan sheets use the root modal host. `AppStore.inventory` and `storageReadings` own product state, clear on account changes, and load through the authenticated repository. Private photos remain private until the atomic `inventory_publish` action creates the listing, pickup location/window, public media reference and seller attestations. `inventory_unlist` archives the linked listing and returns the item to the private collection; claimed/sold listings cannot be removed. Inventory reads and edits are scoped to `ctx.sender`'s registered account.
 
-`StorageSensorConnection` is a native CoreBluetooth adapter for discovery and pairing. No arbitrary BLE bytes become measurements; firmware decoding remains pending. `StorageSummary` rejects other items/devices, future timestamps, invalid units/ranges, samples before the scan and history older than three days. This is a simple sample mean, not an expiry predictor. No connected sensor means no active tracking; if recent recorded samples exist, they are labeled historical averages.
+`StorageSensorConnection` is a main-actor CoreBluetooth central/peripheral delegate. It discovers only the Nano climate service, reads and subscribes to its specific characteristic, guards callbacks against disconnected/replaced peripherals, and cancels discovery/connection/staleness tasks during reset. `ClimatePacket` in RescueCore validates the exact 17-byte version-1 binary record and decodes signed little-endian tenths °F, tenths relative humidity and raw clear-channel light counts using each validity bit. `ClimateStream` suppresses repeated read/notify samples by sequence plus uptime and marks measurements stale at five seconds; disconnect resets sequence history so wraparound/reboots work. `SensorLiveDashboard` hides invalid/stale values and updates once per second. Live values stay on the phone. For explicitly linked items, the controller records at most one valid sample per minute through AppStore, converts temperature to Celsius, and preserves light as raw counts. Failed uploads are not replayed with a new timestamp. Bluetooth background mode permits supported OS delivery; force-quit or a disconnected sensor does not continue recording. `StorageSummary` rejects other items/devices, future timestamps, invalid units/ranges, samples before the scan and history older than three days. Light averages never mix raw counts and lux. FoodQualityEstimate combines matching Gemini metadata with recent recorded averages and elapsed time, using an explicitly provisional Q10=2 temperature rule and a small low-humidity penalty. Colder readings do not extend the suggested life. Missing history or changed food/storage metadata suppresses the estimate. This is a remaining-quality estimate, not a food-safety expiry date. No connected sensor means no active recording; recent recorded samples may still support a labeled historical estimate.
 
-Private cloud photo storage is a bounded prototype (50 items/account, JPEG <=65 KB). Inventory is fetched separately from bootstrap. Full-size object storage, Gemini variety/condition extraction, calibrated expiry forecasting and BLE characteristic ingestion remain unconfigured. Database table/index additions are deployed without deleting existing data.
+Private cloud photo storage is a bounded prototype (50 items/account, JPEG <=65 KB). Inventory is fetched separately from bootstrap. Gemini setup is documented in `docs/GEMINI_SCAN_SETUP.md`; full-size object storage and calibrated expiry forecasting remain outside this prototype. Appended analysis and light-unit columns have migration defaults. Database changes preserve existing data. Known plural food names receive singular search aliases; existing listing indexes can be rebuilt through an owner-only procedure.
+
+The scan sell editor defaults pickup coordinates to the shared current/saved browse location,
+reverse-geocodes its address, and offers an explicit GPS action. Address typing debounces local
+MapKit search; stale/cancelled results cannot replace the selected pickup. Choosing a result does
+not change the app's browse area. Startup recovery preserves the saved account; only explicit
+Sign out clears credentials.
+Refresh failures retain an unexpired identity token and back off; successful renewal clears the
+reconnect state. Interactive sign-in invalidates older refresh callbacks so they cannot overwrite
+the new session or restore its banner. Keychain updates replace credentials without deleting first.
+
+GPS resumes reuse a recent accurate fix, stop showing a pending state when coordinates are usable,
+and time out with address-entry guidance. The sell editor restarts location resolution even if the
+coordinate is unchanged. A keyboard Done action dismisses decimal entry. Collection tabs show counts.
+
+Buyer feed/search/map exclude the authenticated seller's own listings; add-cart/reserve also reject
+self-purchase on the server. Fresh Check creates or reuses a pending request and sends one message
+to its buyer/seller conversation using a stable notification ID. Account earnings come from actual
+monthly summaries, with no fixed baseline. Real accounts do not carry the local-demo subtitle.
+
+Published pickup pins use the selected precise coordinates rather than kilometer-scale rounding;
+street address text remains in the private pickup record. Listing detail recalculates distance from
+the current browse origin. Map pin taps open the listing whose price the annotation displays.
+An optional listing storage snapshot averages only real, matching owner/item/device readings from
+after the scan and within three days. It includes the recording range, count, temperature, humidity
+and light unit. Existing listing rows receive an empty migration default; an owner-only backfill can
+attach matching recorded history. This is recorded environment evidence, not safety certification.
 
 Browse-location headers show “Current location” for GPS and a compact area label for manual selections; the picker retains the full place name. Switching to GPS removes the persisted manual selection. A one-time migration removes the museum selection written by older Simulator address tests; current tests use isolated preferences.
+
+Pickup plans send the selected origin to the server. The server orders stops using travel distance
+and pickup windows; draft plans can be reordered before any requests are sent. The native pickup
+map uses MapKit road directions, public pickup coordinates before confirmation and authorized
+private coordinates afterward. Seller bootstrap includes incoming requests for Messages confirmation
+and handoff controls. Repeated coordination does not duplicate requests or messages.
+
+Listings carry their own public pickup coordinates, independently of a seller's other locations.
+Discovery consolidates repeated bundled-photo seed products while preserving genuine user posts.
+Session refresh errors retain the current account and screen; explicit reconnect is required when
+credentials expire. SpacetimeAuth photo claims or authenticated userinfo populate only the signed-in
+user’s avatar. No identity/student verification flow was added.

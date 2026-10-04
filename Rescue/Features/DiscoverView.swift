@@ -32,18 +32,22 @@ struct DiscoverView: View {
     private var searchActive: Bool { searchFocused || !trimmedSearch.isEmpty }
     private var searchResults: [Listing] {
         if store.isBackend && completedSearch != trimmedSearch { return [] }
-        return store.visibleListings(query: trimmedSearch)
+        return store.distinctSampleListings(store.visibleListings(query: trimmedSearch))
     }
     private struct SearchContext: Equatable {
         let query: String
         let filters: Filters
         let location: BrowseLocation?
     }
-    private var feed: [Listing] { store.visibleListings(query: "") }
+    private var feed: [Listing] { store.distinctSampleListings(store.visibleListings(query: "")) }
+    private var recentlyListed: [Listing] {
+        if store.isBackend { return feed.sorted { $0.updated > $1.updated } }
+        return feed.sorted { $0.distance < $1.distance }
+    }
     private var picked: [Listing] {
-        return store.personalizedListings.filter {
+        return store.distinctSampleListings(store.personalizedListings.filter {
             store.filters.accepts($0, sellers: store.sellers)
-        }
+        })
     }
     private var firstName: String? {
         let name = store.profileName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -80,8 +84,11 @@ struct DiscoverView: View {
                                 router.sheet = .location
                             } label: {
                                 HStack(spacing: 6) {
-                                    Image(systemName: location.usingGPS ? "location.fill" : "mappin")
-                                        .font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.sage)
+                                    Image(
+                                        systemName: location.usingGPS ? "location.fill" : "mappin"
+                                    )
+                                    .font(.system(size: 12, weight: .medium)).foregroundStyle(
+                                        Theme.sage)
                                     Text(location.label).lineLimit(1).truncationMode(.tail)
                                     Image(systemName: "chevron.down").font(
                                         .system(size: 10, weight: .semibold))
@@ -133,6 +140,9 @@ struct DiscoverView: View {
                 }.padding(.horizontal, 20).padding(.top, 12)
                 if searchActive {
                     searchContent
+                } else if store.isBackend && store.catalog.isEmpty && store.feedLoading {
+                    ProgressView("Finding food…")
+                        .frame(maxWidth: .infinity).padding(.vertical, 80)
                 } else if store.isBackend && store.catalog.isEmpty {
                     EmptyState(
                         title: store.online ? "No listings yet" : "Unable to load listings",
@@ -144,6 +154,8 @@ struct DiscoverView: View {
                             router.tab = .scan
                         }.padding(.horizontal, 20)
                     }
+                } else if feed.isEmpty {
+                    nearbyEmptyState
                 } else {
                     FeedSection(
                         title: "Picked for you", subtitle: "Based on what you like", items: picked
@@ -207,14 +219,11 @@ struct DiscoverView: View {
                     }
                     FeedSection(
                         title: "Just listed near you",
-                        items: feed.sorted { $0.distance < $1.distance }
+                        items: recentlyListed
                     ) {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(alignment: .top, spacing: 24) {
-                                let nearby = Array(
-                                    feed.filter { $0.distance <= 0.7 }.sorted {
-                                        $0.distance < $1.distance
-                                    }.prefix(9))
+                                let nearby = Array(recentlyListed.prefix(9))
                                 ForEach(Array(stride(from: 0, to: nearby.count, by: 3)), id: \.self)
                                 {
                                     start in
@@ -284,10 +293,41 @@ struct DiscoverView: View {
                     await store.searchBackend(trimmedSearch)
                 } else {
                     await store.refreshBackend(force: true)
-                    await store.loadNextPage(first: true)
+                    await store.refreshMarketplace()
                 }
             }.background(Theme.ivory).foregroundStyle(Theme.ink).toolbar(
                 .hidden, for: .navigationBar)
+    }
+    private var nearbyEmptyState: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "location.magnifyingglass")
+                .font(.system(size: 30, weight: .medium))
+                .foregroundStyle(Theme.save)
+                .frame(width: 72, height: 72)
+                .background(Theme.sage.opacity(0.18), in: Circle())
+            VStack(spacing: 8) {
+                Text("A little further afield?").rescueFont(23, .bold)
+                Text(
+                    "No food matches within \(store.filters.distance.formatted()) miles. Try a wider area or adjust your filters."
+                )
+                .rescueFont(15).foregroundStyle(Theme.secondary)
+                .multilineTextAlignment(.center)
+            }
+            if let radius = store.suggestedBrowseRadius {
+                PrimaryButton(
+                    title: "Explore within \(radius.formatted()) miles", id: "expand-browse-area"
+                ) {
+                    withAnimation(Theme.spring) { store.filters.distance = radius }
+                }
+            }
+            HStack(spacing: 24) {
+                Button("Choose location") { router.sheet = .location }
+                    .accessibilityIdentifier("empty-feed-location")
+                Button("Adjust filters") { router.sheet = .filters }
+                    .accessibilityIdentifier("empty-feed-filters")
+            }.rescueFont(15, .semibold).foregroundStyle(Theme.save)
+        }
+        .padding(24).frame(maxWidth: .infinity).padding(.top, 48)
     }
     private var searchContent: some View {
         VStack(alignment: .leading, spacing: 16) {

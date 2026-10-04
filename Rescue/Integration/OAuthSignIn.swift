@@ -8,6 +8,7 @@ import UIKit
     struct Tokens: Decodable {
         let id_token: String
         let refresh_token: String?
+        let access_token: String?
     }
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
         UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }

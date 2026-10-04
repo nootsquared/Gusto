@@ -32,6 +32,23 @@ struct ListingDetailView: View {
                         Text(item.name).rescueFont(26, .semibold).accessibilityIdentifier(
                             "listing-title")
                         PriceLabel(item: item, size: 34)
+                        if let conditions = item.storageConditions {
+                            VStack(alignment: .leading, spacing: 7) {
+                                Label("Recorded by storage sensor", systemImage: "sensor.tag.radiowaves.forward")
+                                    .rescueFont(13, .semibold).foregroundStyle(Theme.save)
+                                Text("\(conditions.temperature, specifier: "%.1f")°C · \(conditions.humidity, specifier: "%.0f")% humidity")
+                                    .rescueFont(15, .semibold)
+                                if let light = conditions.light {
+                                    Text("\(light, specifier: "%.0f") \(conditions.lightUnit == "lux" ? "lux" : "raw light")")
+                                        .rescueFont(12).foregroundStyle(Theme.secondary)
+                                }
+                                Text("\(conditions.sampleCount) readings · \(Date(timeIntervalSince1970: conditions.from / 1000).formatted(date: .abbreviated, time: .shortened)) – \(Date(timeIntervalSince1970: conditions.until / 1000).formatted(date: .abbreviated, time: .shortened))")
+                                    .rescueFont(11).foregroundStyle(Theme.secondary)
+                                Text("Average conditions during the recording period.")
+                                    .rescueFont(12).foregroundStyle(Theme.secondary)
+                            }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Theme.soft, in: RoundedRectangle(cornerRadius: 16))
+                        }
                         Text("You save \(Money.text(item.savings))").rescueFont(15, .medium)
                             .foregroundStyle(Theme.save)
                         Label(
@@ -133,7 +150,7 @@ struct ListingDetailView: View {
                         } else {
                             PrimaryButton(
                                 title: "Add to cart · \(Money.text(item.price))",
-                                disabled: store.runActive || store.backendBusy, id: "add-to-cart"
+                                disabled: store.runActive || store.backendBusy || item.sellerID == store.accountID, id: "add-to-cart"
                             ) { if store.addToCart(id) { Haptic.success() } }
                         }
                     }

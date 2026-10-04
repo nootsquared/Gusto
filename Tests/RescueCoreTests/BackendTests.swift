@@ -211,6 +211,50 @@ private final class StubURLProtocol: URLProtocol {
         XCTAssertFalse(store.addToCart("straw"))
         XCTAssertTrue(store.cart.isEmpty)
     }
+    func testMarketplaceRefreshFindsLaterPagesAndRemovesWithdrawnListings() async throws {
+        let initial = try bootstrap("a")
+        var updated = false
+        var failLaterPage = false
+        let encoder = JSONEncoder()
+        StubURLProtocol.handler = { request in
+            var data = request.httpBody ?? Data()
+            if data.isEmpty, let stream = request.httpBodyStream {
+                stream.open()
+                defer { stream.close() }
+                var buffer = [UInt8](repeating: 0, count: 1024)
+                while stream.hasBytesAvailable {
+                    let count = stream.read(&buffer, maxLength: buffer.count)
+                    if count < 0 { throw URLError(.cannotDecodeContentData) }
+                    if count == 0 { break }
+                    data.append(contentsOf: buffer.prefix(count))
+                }
+            }
+            let body = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+            let query = body[0]
+            if query["action"] as? String == "bootstrap" { return try self.wire(initial) }
+            XCTAssertEqual(query["action"] as? String, "feed")
+            let first = (query["cursor"] as? String ?? "").isEmpty
+            if !first && failLaterPage { throw URLError(.notConnectedToInternet) }
+            let id = first ? (updated ? "bread" : "straw") : (updated ? "gran" : "bread")
+            let page = BackendPage(
+                listings: MockCatalog.listings.filter { $0.id == id },
+                sellers: MockCatalog.sellers, cursor: first ? "next" : "")
+            return try self.wire(encoder.encode(page))
+        }
+        let store = AppStore(service: DemoService(delayNanoseconds: 0))
+        await store.connect(repository("a"))
+        XCTAssertEqual(Set(store.catalog.map(\.id)), ["straw", "bread"])
+        updated = true
+        await store.refreshMarketplace()
+        XCTAssertEqual(Set(store.catalog.map(\.id)), ["bread", "gran"])
+        XCTAssertTrue(store.online)
+        XCTAssertTrue(store.feedCursor.isEmpty)
+        updated = false
+        failLaterPage = true
+        await store.refreshMarketplace()
+        XCTAssertEqual(Set(store.catalog.map(\.id)), ["bread", "gran"])
+        XCTAssertFalse(store.online)
+    }
     func testSwitchImmediatelyClearsPreviousPrivateState() async throws {
         let store = AppStore(service: DemoService(delayNanoseconds: 0))
         store.addToCart("straw")

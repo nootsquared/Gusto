@@ -7,6 +7,23 @@ import XCTest
 #endif
 
 final class FoodInventoryTests: XCTestCase {
+    func testQualityEstimateRequiresMatchedFoodAndRealHistoryAndShrinksWithHeat() throws {
+        let now = 1_000_000_000.0
+        var item = InventoryFood(id: "banana", name: "Banana", condition: "Ripe", scannedAt: now, deviceID: "sensor")
+        let analysis = FoodAnalysis(name: "Banana", variety: "", category: "Produce", condition: "Ripe", quantity: "1 item", storage: "Counter", description: "Ripe banana", allergens: "Check label", confidence: 0.9, opened: false, vegetarian: true, prepared: false, referenceTemperature: 20, idealTemperatureMin: 13, idealTemperatureMax: 20, idealHumidityMin: 50, idealHumidityMax: 95, qualityDaysMin: 2, qualityDaysMax: 4, box: [0,0,1000,1000])
+        item.analysis = String(decoding: try JSONEncoder().encode(analysis), as: UTF8.self)
+        XCTAssertNil(FoodQualityEstimate.estimate(item, readings: [], now: now))
+        let reading = StorageReading(itemID: item.id, deviceID: "sensor", temperature: 20, humidity: 60, light: 123, recordedAt: now)
+        XCTAssertEqual(FoodQualityEstimate.estimate(item, readings: [reading], now: now)?.daysMax, 4)
+        var warm = reading
+        warm.temperature = 30
+        XCTAssertEqual(FoodQualityEstimate.estimate(item, readings: [warm], now: now)?.daysMax, 2)
+        item.name = "Tomato"
+        XCTAssertNil(FoodQualityEstimate.estimate(item, readings: [reading], now: now))
+        item.name = "Banana"
+        item.deviceID = ""
+        XCTAssertNil(FoodQualityEstimate.estimate(item, readings: [reading], now: now))
+    }
     func testSummaryRejectsOtherItemsDevicesFutureAndExpiredSamples() {
         let now = 1_000_000_000.0
         let item = InventoryFood(

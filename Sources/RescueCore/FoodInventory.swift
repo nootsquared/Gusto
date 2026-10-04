@@ -14,6 +14,11 @@ public struct InventoryFood: Codable, Identifiable, Equatable, Sendable {
     public var scannedAt: Double
     public var listingID: String
     public var deviceID: String
+    public var analysis: String? = nil
+    public var scanAnalysis: FoodAnalysis? {
+        guard let analysis, let data = analysis.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(FoodAnalysis.self, from: data)
+    }
     public init(
         id: String = UUID().uuidString, name: String = "", variety: String = "",
         category: String = "Produce", condition: String = "Not assessed",
@@ -49,6 +54,7 @@ public struct StorageReading: Codable, Identifiable, Equatable, Sendable {
     public var humidity: Double
     public var light: Double
     public var recordedAt: Double
+    public var lightUnit: String? = nil
     public init(
         id: String = UUID().uuidString, itemID: String, deviceID: String,
         temperature: Double, humidity: Double, light: Double, recordedAt: Double
@@ -63,10 +69,63 @@ public struct StorageReading: Codable, Identifiable, Equatable, Sendable {
     }
 }
 
+public struct FoodAnalysis: Codable, Equatable, Sendable {
+    public let name: String
+    public let variety: String
+    public let category: String
+    public let condition: String
+    public let quantity: String
+    public let storage: String
+    public let description: String
+    public let allergens: String
+    public let confidence: Double
+    public let opened: Bool
+    public let vegetarian: Bool
+    public let prepared: Bool
+    public let referenceTemperature: Double
+    public let idealTemperatureMin: Double
+    public let idealTemperatureMax: Double
+    public let idealHumidityMin: Double
+    public let idealHumidityMax: Double
+    public let qualityDaysMin: Double
+    public let qualityDaysMax: Double
+    public let box: [Double]
+}
+
+/// Prototype quality estimate, not a food-safety expiration or a calibrated biological model.
+public struct FoodQualityEstimate: Sendable {
+    public let daysMin: Double
+    public let daysMax: Double
+    public let temperature: Double
+    public let humidity: Double
+    public let samples: Int
+    public static func estimate(_ item: InventoryFood, readings: [StorageReading], now: Double = Date().timeIntervalSince1970 * 1000) -> Self? {
+        guard let a = item.scanAnalysis, a.qualityDaysMax > 0,
+            ["Unripe", "Ripe", "Use soon"].contains(item.condition),
+            a.condition == item.condition, a.name == item.name, a.variety == item.variety,
+            a.storage == item.storage,
+            let summary = StorageSummary.recent(readings, item: item, now: now),
+            now >= item.scannedAt, a.referenceTemperature.isFinite,
+            a.qualityDaysMin.isFinite, a.qualityDaysMax.isFinite,
+            a.qualityDaysMin >= 0, a.qualityDaysMax >= a.qualityDaysMin, a.qualityDaysMax <= 60
+        else { return nil }
+        // Q10=2 is an explicit demo assumption. Cooling below the reference never promises a longer life.
+        let temperatureFactor = min(8, max(1, pow(2, (summary.temperature - a.referenceTemperature) / 10)))
+        let humidityFactor = summary.humidity < a.idealHumidityMin ? 1.15 : 1.0
+        let rate = temperatureFactor * humidityFactor
+        let elapsed = (now - item.scannedAt) / 86_400_000
+        return Self(daysMin: max(0, a.qualityDaysMin / rate - elapsed), daysMax: max(0, a.qualityDaysMax / rate - elapsed), temperature: summary.temperature, humidity: summary.humidity, samples: summary.count)
+    }
+    public var label: String {
+        daysMax < 1 ? "Check today" : "About \(max(1, Int(floor(daysMin))))–\(max(1, Int(ceil(daysMax)))) days"
+    }
+}
+
 public struct StorageSummary: Equatable, Sendable {
     public let temperature: Double
     public let humidity: Double
     public let light: Double
+    public let lightUnit: String
     public let latest: Double
     public let count: Int
     public var isLive: Bool { Date().timeIntervalSince1970 * 1000 - latest < 300_000 }
@@ -83,10 +142,12 @@ public struct StorageSummary: Equatable, Sendable {
         }
         guard !valid.isEmpty else { return nil }
         let count = Double(valid.count)
+        let lightUnit = valid.contains { $0.lightUnit == "raw" } ? "raw" : "lux"
+        let lightSamples = valid.filter { ($0.lightUnit ?? "lux") == lightUnit }
         return StorageSummary(
             temperature: valid.reduce(0) { $0 + $1.temperature } / count,
             humidity: valid.reduce(0) { $0 + $1.humidity } / count,
-            light: valid.reduce(0) { $0 + $1.light } / count,
+            light: lightSamples.reduce(0) { $0 + $1.light } / Double(lightSamples.count), lightUnit: lightUnit,
             latest: valid.map(\.recordedAt).max()!, count: valid.count)
     }
 }

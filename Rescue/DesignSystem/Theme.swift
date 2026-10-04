@@ -80,6 +80,34 @@ enum Haptic {
 enum NavigationArtwork {
     enum Icon { case discover, map, scan, messages, profile }
 
+    static func accountIcon(_ image: UIImage?, name: String, selected: Bool) -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: 32, height: 32)).image { renderer in
+            let bounds = CGRect(x: 3, y: 2, width: 26, height: 26)
+            let context = renderer.cgContext
+            context.saveGState()
+            UIBezierPath(ovalIn: bounds).addClip()
+            if let image {
+                let scale = max(26 / image.size.width, 26 / image.size.height)
+                let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+                image.draw(in: CGRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2, width: size.width, height: size.height))
+            } else {
+                (UIColor(named: "Save") ?? .systemGreen).setFill()
+                context.fill(bounds)
+                let letter = String(name.prefix(1)).uppercased() as NSString
+                let attributes: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: UIColor.white]
+                let size = letter.size(withAttributes: attributes)
+                letter.draw(at: CGPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2), withAttributes: attributes)
+            }
+            context.restoreGState()
+            if selected {
+                (UIColor(named: "Save") ?? .systemGreen).setStroke()
+                let ring = UIBezierPath(ovalIn: bounds.insetBy(dx: -2, dy: -2))
+                ring.lineWidth = 1.5
+                ring.stroke()
+            }
+        }.withRenderingMode(.alwaysOriginal)
+    }
+
     static func tabIcon(_ icon: Icon, selected: Bool) -> UIImage {
         UIGraphicsImageRenderer(size: CGSize(width: 32, height: 32)).image { renderer in
             let context = renderer.cgContext

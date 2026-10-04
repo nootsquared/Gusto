@@ -1,4 +1,76 @@
+import MapKit
 import SwiftUI
+
+struct PickupRouteMap: View {
+    @Environment(LocationController.self) private var location
+    let stops: [PickupStop]
+    @State private var routes: [MKPolyline] = []
+    @State private var travelMinutes: Int?
+    private func point(_ stop: PickupStop) -> CLLocationCoordinate2D {
+        if let exact = stop.privateLocation, exact.cacheUntil > Date().timeIntervalSince1970 * 1000 {
+            return CLLocationCoordinate2D(latitude: exact.latitude, longitude: exact.longitude)
+        }
+        return CLLocationCoordinate2D(latitude: stop.seller.latitude, longitude: stop.seller.longitude)
+    }
+    private var routeKey: String {
+        "\(location.selection?.latitude ?? 0):\(location.selection?.longitude ?? 0):"
+            + stops.map { "\($0.id):\(point($0).latitude):\(point($0).longitude)" }.joined(separator: "|")
+    }
+    var body: some View {
+        Map {
+            if location.usingGPS { UserAnnotation() }
+            if let origin = location.selection {
+                Marker("Starting point", systemImage: "location.fill", coordinate: CLLocationCoordinate2D(latitude: origin.latitude, longitude: origin.longitude)).tint(Theme.sage)
+            }
+            ForEach(Array(stops.enumerated()), id: \.element.id) { index, stop in
+                Marker("\(index + 1). \(stop.seller.firstName)", coordinate: point(stop)).tint(Theme.save)
+            }
+            ForEach(Array(routes.enumerated()), id: \.offset) { _, route in
+                MapPolyline(route).stroke(Theme.save, lineWidth: 4)
+            }
+        }.mapStyle(.standard(elevation: .flat)).mapControls { MapCompass() }
+            .overlay(alignment: .topLeading) {
+                if let travelMinutes {
+                    Text("\(travelMinutes) min travel").rescueFont(12, .semibold)
+                        .padding(10).background(Theme.paper, in: Capsule()).padding(12)
+                }
+            }.overlay(alignment: .bottomTrailing) {
+                if let first = stops.first {
+                    Button {
+                        let item = MKMapItem(placemark: MKPlacemark(coordinate: point(first)))
+                        item.name = "Pickup with \(first.seller.firstName)"
+                        item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving])
+                    } label: {
+                        Label("Directions", systemImage: "arrow.up.right").rescueFont(12, .semibold)
+                            .padding(10).background(Theme.paper, in: Capsule())
+                    }.buttonStyle(.plain).padding(12)
+                }
+            }.accessibilityIdentifier("pickup-apple-map")
+            .task(id: routeKey) {
+                routes = []
+                travelMinutes = nil
+                guard let origin = location.selection else { return }
+                var start = CLLocationCoordinate2D(latitude: origin.latitude, longitude: origin.longitude)
+                var paths: [MKPolyline] = []
+                var seconds = 0.0
+                for stop in stops {
+                    let destination = point(stop)
+                    let request = MKDirections.Request()
+                    request.source = MKMapItem(placemark: MKPlacemark(coordinate: start))
+                    request.destination = MKMapItem(placemark: MKPlacemark(coordinate: destination))
+                    request.transportType = .automobile
+                    guard let response = try? await MKDirections(request: request).calculate(),
+                        let route = response.routes.first, !Task.isCancelled else { return }
+                    paths.append(route.polyline)
+                    seconds += route.expectedTravelTime
+                    start = destination
+                }
+                guard !Task.isCancelled else { return }
+                routes = paths
+                travelMinutes = Int(ceil(seconds / 60))
+            }
+    }
+}
 
 struct SavingsHero: View {
     let totals: Totals
@@ -28,6 +100,7 @@ struct SavingsHero: View {
 struct CartView: View {
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
+    @Environment(LocationController.self) private var location
     private var groups: [PickupStop] { PickupPlanner.build(items: store.cartItems).stops }
     var body: some View {
         Group {
@@ -112,6 +185,8 @@ struct CartView: View {
                             Task {
                                 if store.runActive {
                                     router.sheet = .run
+                                } else if store.isBackend && location.selection == nil && !ProcessInfo.processInfo.arguments.contains("--uitesting") {
+                                    router.sheet = .location
                                 } else if await store.confirmCartAndPlan() {
                                     router.sheet = .run
                                 }
@@ -130,7 +205,6 @@ struct CartView: View {
 struct PickupFlowView: View {
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
-    @State private var mode: RouteMode = .fastest
     @State private var pin: String?
     var body: some View {
         Group {
@@ -149,28 +223,38 @@ struct PickupFlowView: View {
     private var planView: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                RescueMap(items: [], stops: store.plan?.stops ?? [], selectedID: $pin).frame(
+                PickupRouteMap(stops: store.plan?.stops ?? []).frame(
                     height: 240
                 ).clipShape(RoundedRectangle(cornerRadius: 24))
                 if let plan = store.plan, !plan.stops.isEmpty {
                     Text(plan.allConfirmed ? "ALL CONFIRMED" : "SMART PICKUP PLAN").rescueFont(
                         13, .semibold
                     ).foregroundStyle(Theme.sage)
-                    Text(
-                        mode == .fastest
-                            ? "Your fastest pickup route"
-                            : mode == .shortest
-                                ? "Your shortest pickup route" : "Your best pickup times"
-                    ).rescueFont(26, .semibold)
-                    Text(
-                        "\(plan.stops.count) stops · \(plan.elapsed) min · \(String(format: "%.1f", plan.distance)) mi"
-                    ).rescueFont(15).foregroundStyle(Theme.secondary)
-                    Picker("Route preference", selection: $mode) {
-                        ForEach(RouteMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                    }.pickerStyle(.segmented).disabled(
-                        store.coordinating || plan.stops.contains { $0.status != .unconfirmed }
-                    )
-                    .onChange(of: mode) { _, value in store.makePlan(mode: value) }
+                    Text(plan.allConfirmed ? "You're ready to go" : plan.stops.contains { $0.status == .waiting } ? "Requests sent" : "Your pickup route").rescueFont(26, .semibold)
+                    Text("\(plan.stops.count) stops · optimized for distance and pickup windows")
+                        .rescueFont(14).foregroundStyle(Theme.secondary)
+                    if plan.stops.allSatisfy({ $0.status == .unconfirmed }) {
+                        Text("Want a different order? Move stops before sending requests.")
+                            .rescueFont(13).foregroundStyle(Theme.secondary)
+                        ScrollView(.horizontal, showsIndicators: false) { HStack {
+                            ForEach(Array(plan.stops.enumerated()), id: \.element.id) { index, stop in
+                                Menu {
+                                    if index > 0 { Button("Move earlier") { Task { await store.movePickupStop(stop.id, by: -1) } } }
+                                    if index + 1 < plan.stops.count { Button("Move later") { Task { await store.movePickupStop(stop.id, by: 1) } } }
+                                } label: {
+                                    Label("\(index + 1). \(stop.seller.firstName)", systemImage: "line.3.horizontal")
+                                        .rescueFont(12, .semibold).padding(10).background(Theme.soft, in: Capsule())
+                                }.disabled(store.backendBusy).accessibilityIdentifier("reorder-\(stop.id)")
+                            }
+                        } }
+                    } else if !plan.allConfirmed {
+                        Text("Each seller needs to confirm your pickup time. Open a chat below to check in; Start pickups appears once everyone confirms.")
+                            .rescueFont(14).foregroundStyle(Theme.secondary)
+                        if store.isBackend && plan.stops.contains(where: { stop in MockCatalog.sellers.contains(where: { $0.id == stop.seller.id }) }) {
+                            Text("Sample sellers are fictional and cannot reply. Use a listing from another signed-in account to try real confirmations.")
+                                .rescueFont(12).foregroundStyle(Theme.muted)
+                        }
+                    }
                     if let sellerID = store.counterSellerID {
                         let seller = store.seller(sellerID)
                         VStack(alignment: .leading, spacing: 10) {
@@ -199,7 +283,7 @@ struct PickupFlowView: View {
                         MetricCard(
                             value: String(format: "%.1f lb", plan.totals.pounds), label: "food saved")
                     }
-                    Text("Demo estimates · fixed pickup area").rescueFont(12).foregroundStyle(
+                    Text("Pickup addresses are shared after the seller confirms.").rescueFont(12).foregroundStyle(
                         Theme.muted)
                 } else {
                     EmptyState(
@@ -214,10 +298,12 @@ struct PickupFlowView: View {
                         title: "Start pickups", symbol: "location.fill", color: Theme.deep,
                         id: "start-run"
                     ) {
-                        if store.startRun() {
-                            router.tab = .map
-                            router.sheet = nil
-                            Haptic.success()
+                        Task {
+                            if await store.beginPickups() {
+                                router.tab = .map
+                                router.sheet = nil
+                                Haptic.success()
+                            }
                         }
                     }
                 } else {
@@ -226,8 +312,10 @@ struct PickupFlowView: View {
                             ? "Messaging sellers…"
                             : store.counterSellerID != nil
                                 ? "Waiting on 1 seller"
-                                : "Coordinate All \(store.plan?.stops.count ?? 0)",
-                        disabled: store.coordinating || store.counterSellerID != nil
+                                : store.plan?.stops.contains(where: { $0.status == .waiting }) == true
+                                    ? "Waiting for seller confirmations" : "Send pickup requests",
+                        disabled: store.coordinating || store.backendBusy || store.counterSellerID != nil
+                            || store.plan?.stops.contains(where: { $0.status == .unconfirmed }) != true
                             || store.plan?.stops.isEmpty != false, id: "coordinate"
                     ) {
                         Task {
@@ -242,13 +330,13 @@ struct PickupFlowView: View {
     private var timelineView: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                RescueMap(items: [], stops: store.plan?.stops ?? [], selectedID: $pin).frame(
+                PickupRouteMap(stops: store.plan?.stops ?? []).frame(
                     height: 200
                 ).clipShape(RoundedRectangle(cornerRadius: 24))
                 Text("Pickup trip · stop \(store.stopIndex + 1) of \(store.plan?.stops.count ?? 0)")
                     .rescueFont(22, .semibold)
                 PickupTimeline(stops: store.plan?.stops ?? [], allowDelay: true)
-                Text("Arrival is simulated for this demo. No location access is used.").rescueFont(
+                Text(store.isBackend ? "Use Directions to navigate, then mark your arrival below." : "Arrival is simulated for this demo.").rescueFont(
                     13
                 ).foregroundStyle(Theme.muted)
             }.padding(20)
@@ -256,7 +344,7 @@ struct PickupFlowView: View {
             BottomAction {
                 PrimaryButton(
                     title:
-                        "Simulate arrival at \(store.currentStop?.seller.firstName ?? "seller")'s",
+                        (store.isBackend ? "I’ve arrived at " : "Simulate arrival at ") + "\(store.currentStop?.seller.firstName ?? "seller")'s",
                     symbol: "location", id: "arrive"
                 ) {
                     store.arrive()
@@ -278,7 +366,7 @@ struct PickupFlowView: View {
                     switch store.phase {
                     case .arrived, .waiting:
                         Label(
-                            "Demo pickup spot · \(stop.seller.area)",
+                            store.isBackend ? "Pickup with \(stop.seller.firstName)" : "Demo pickup spot · \(stop.seller.area)",
                             systemImage: "mappin.and.ellipse"
                         ).rescueFont(13, .semibold).foregroundStyle(Theme.sage)
                         Text("You've arrived").rescueFont(28, .semibold)
@@ -410,6 +498,7 @@ private struct HandoffItem: View {
 }
 
 struct PickupTimeline: View {
+    @Environment(AppRouter.self) private var router
     @Environment(AppStore.self) private var store
     let stops: [PickupStop]
     var allowDelay = false
@@ -440,8 +529,16 @@ struct PickupTimeline: View {
                         Text(
                             "\(stop.seller.firstName) · \(stop.items.map { $0.name.replacingOccurrences(of: "Organic ", with: "").replacingOccurrences(of: "Unopened ", with: "") }.joined(separator: ", "))"
                         ).rescueFont(16, .semibold)
-                        Text("\(stop.seller.area) · \(Money.text(stop.totals.pay))").rescueFont(13)
+                        Text("Pickup stop \(index + 1) · \(Money.text(stop.totals.pay))").rescueFont(13)
                             .foregroundStyle(Theme.secondary)
+                        if store.phase == .idle {
+                            Text(stop.status == .confirmed ? "Confirmed" : stop.status == .waiting ? "Waiting for seller" : "Not requested yet")
+                                .rescueFont(12, .semibold).foregroundStyle(stop.status == .confirmed ? Theme.save : Theme.secondary)
+                            if stop.status != .unconfirmed {
+                                Button("Message \(stop.seller.firstName)") { router.chat(stop.seller.id) }
+                                    .rescueFont(13, .semibold).foregroundStyle(Theme.save)
+                            }
+                        }
                         if stop.status == .skipped {
                             Text("Issue reported · no charge").rescueFont(12).foregroundStyle(
                                 Theme.apricot)

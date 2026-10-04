@@ -188,6 +188,27 @@ struct ChatView: View {
                 }.padding(10).card(radius: 16).padding(.horizontal, 20).padding(.bottom, 8)
                     .accessibilityIdentifier("pinned-product")
             }
+            ForEach(store.pickupRequests.filter { $0.buyerId == sellerID }) { request in
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(request.status == "waiting" ? "Pickup request" : "Pickup confirmed")
+                        .rescueFont(16, .semibold)
+                    Text(request.items.map(\.name).joined(separator: ", ")).rescueFont(13)
+                    Text(Date(timeIntervalSince1970: request.proposed / 1000), style: .time)
+                        .rescueFont(14, .semibold).foregroundStyle(Theme.save)
+                    if request.status == "waiting" {
+                        Button("Confirm pickup") { Task { await store.confirmSellerPickup(request.id) } }
+                            .buttonStyle(.borderedProminent).tint(Theme.save).disabled(store.backendBusy)
+                            .accessibilityIdentifier("confirm-pickup-\(request.id)")
+                    } else if request.phase == "waiting" {
+                        Button("Confirm handoff") { Task { await store.completeSellerHandoff(request.id) } }
+                            .buttonStyle(.borderedProminent).tint(Theme.save).disabled(store.backendBusy)
+                            .accessibilityIdentifier("confirm-handoff-\(request.id)")
+                    } else {
+                        Text("The buyer will let you know when they arrive.").rescueFont(12).foregroundStyle(Theme.secondary)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(16).card(radius: 20)
+                    .padding(.horizontal, 20).padding(.bottom, 8)
+            }
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 8) {

@@ -23,9 +23,13 @@ import Security
     private var observers: [UUID: AsyncStream<BackendSession>.Continuation] = [:]
     private(set) var signingIn = false
     private(set) var authError: String?
+    private(set) var needsSignIn = false
+    private(set) var profileRevision = 0
     private let oauth = OAuthSignIn()
     private var refreshTask: Task<BackendSession, Error>?
+    private var nextRefreshAttempt = Date.distantPast
     private var refreshToken: String?
+    private var accessToken: String?
     private var expiresAt: Date = .distantPast
     private var subject: String?
     private var generation = UUID()
@@ -33,6 +37,7 @@ import Security
         let accounts: [BackendSession]
         let selected: String
         var refreshToken: String?
+        var accessToken: String?
         var expiresAt: Date?
         var subject: String?
     }
@@ -50,8 +55,10 @@ import Security
             accounts = stored.accounts
             current = accounts.first { $0.userId == stored.selected }
             refreshToken = stored.refreshToken
-            expiresAt = stored.expiresAt ?? .distantPast
-            subject = stored.subject
+            accessToken = stored.accessToken
+            let claims = current.flatMap { try? RescueOAuth.claims($0.token) }
+            expiresAt = stored.expiresAt ?? claims.map { Date(timeIntervalSince1970: $0.exp) } ?? .distantPast
+            subject = stored.subject ?? claims?.sub
         }
     }
     func loadDemoAccounts() async throws {
@@ -90,12 +97,16 @@ import Security
         let data = try JSONEncoder().encode(
             Stored(
                 accounts: accounts, selected: current?.userId ?? "", refreshToken: refreshToken,
+                accessToken: accessToken,
                 expiresAt: expiresAt, subject: subject))
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service, kSecAttrAccount as String: key,
         ]
-        SecItemDelete(query as CFDictionary)
+        let updated = SecItemUpdate(query as CFDictionary,
+            [kSecValueData as String: data] as CFDictionary)
+        if updated == errSecSuccess { return }
+        guard updated == errSecItemNotFound else { throw RepositoryError.server("keychain_unavailable") }
         var attributes = query
         attributes[kSecValueData as String] = data
         attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
@@ -105,10 +116,16 @@ import Security
     }
     func currentSession() async throws -> BackendSession {
         guard let current else { throw RepositoryError.server("unauthorized") }
-        if !isLocalBackend && expiresAt.timeIntervalSinceNow < 90 {
+        if signingIn && expiresAt <= Date() { throw RepositoryError.server("authentication_unavailable") }
+        if !isLocalBackend && !signingIn && expiresAt.timeIntervalSinceNow < 90 {
             if let refreshTask { return try await refreshTask.value }
+            if nextRefreshAttempt > Date() {
+                if expiresAt > Date() { return current }
+                throw RepositoryError.server(needsSignIn ? "sign_in_required" : "authentication_unavailable")
+            }
             guard let refreshToken else {
-                signOut()
+                if expiresAt > Date() { return current }
+                needsSignIn = true
                 throw RepositoryError.server("sign_in_required")
             }
             let generation = generation
@@ -124,17 +141,22 @@ import Security
                 self.current = session
                 self.accounts = [session]
                 self.refreshToken = tokens.refresh_token ?? refreshToken
+                self.accessToken = tokens.access_token ?? self.accessToken
                 self.expiresAt = Date(timeIntervalSince1970: claims.exp)
                 try self.persist()
+                self.needsSignIn = false
+                self.authError = nil
+                self.nextRefreshAttempt = .distantPast
                 return session
             }
             refreshTask = task
-            defer { refreshTask = nil }
+            defer { if generation == self.generation { refreshTask = nil } }
             do { return try await task.value } catch {
-                if case RepositoryError.server("sign_in_required") = error,
-                    generation == self.generation
-                {
-                    signOut()
+                guard generation == self.generation else { throw error }
+                nextRefreshAttempt = Date().addingTimeInterval(20)
+                if expiresAt > Date() { return current }
+                if case RepositoryError.server("sign_in_required") = error {
+                    needsSignIn = true
                     authError = "Your session expired. Please sign in again."
                 }
                 throw error
@@ -146,7 +168,11 @@ import Security
         guard !isLocalBackend, !signingIn else { return }
         signingIn = true
         authError = nil
-        let activeGeneration = generation
+        let activeGeneration = UUID()
+        generation = activeGeneration
+        refreshTask?.cancel()
+        refreshTask = nil
+        nextRefreshAttempt = .distantPast
         defer { signingIn = false }
         do {
             let tokens = try await oauth.signIn()
@@ -155,12 +181,15 @@ import Security
             guard activeGeneration == generation else { return }
             let session = BackendSession(userId: userID, token: tokens.id_token)
             refreshToken = tokens.refresh_token
+            accessToken = tokens.access_token
             expiresAt = Date(timeIntervalSince1970: claims.exp)
             subject = claims.sub
             accounts = [session]
             current = session
+            needsSignIn = false
+            nextRefreshAttempt = .distantPast
+            profileRevision += 1
             do { try persist() } catch {
-                signOut()
                 throw error
             }
             for observer in observers.values { observer.yield(session) }
@@ -169,6 +198,24 @@ import Security
                 authError = error.localizedDescription
             }
         }
+    }
+    func syncProfile() async throws {
+        guard !isLocalBackend else { return }
+        let session = try await currentSession()
+        guard try await registerProfile(token: session.token) == session.userId else {
+            throw RepositoryError.server("unauthorized")
+        }
+        guard let accessToken else { return }
+        var request = URLRequest(url: URL(string: "https://auth.spacetimedb.com/oidc/me")!)
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 15
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200,
+            let profile = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            profile["sub"] as? String == subject,
+            let picture = profile["picture"] as? String,
+            URL(string: picture)?.scheme == "https", !picture.isEmpty else { return }
+        _ = try await repository().request(APIRequest("profile_photo", text: picture, write: true))
     }
     private func registerProfile(token: String) async throws -> String {
         var request = URLRequest(
@@ -194,12 +241,16 @@ import Security
         return userID
     }
     func signOut() {
+        authError = nil
+        needsSignIn = false
+        nextRefreshAttempt = .distantPast
         generation = UUID()
         refreshTask?.cancel()
         refreshTask = nil
         current = nil
         accounts = []
         refreshToken = nil
+        accessToken = nil
         subject = nil
         expiresAt = .distantPast
         SecItemDelete(

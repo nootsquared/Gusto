@@ -20,6 +20,7 @@ const listings = table({ name: 'listings', indexes: [
   freshness: t.string(), opened: t.bool(), prepared: t.bool(), storage: t.string(), allergens: t.string(),
   vegetarian: t.bool(), purchased: t.string(), bestBy: t.string(), status: t.string(), area: t.string(),
   version: t.u32(), created: t.u64(), creationOrder: t.u64(), updated: t.u64(),
+  storageConditions: t.string().default(''),
 });
 const mediaAssets = table({ name: 'media_assets' }, {
   id: t.string().primaryKey(), ownerId: t.string().index('btree'), key: t.string(), hash: t.string(),
@@ -167,13 +168,14 @@ const foodInventory = table({name:'food_inventory'}, {
   id:t.string().primaryKey(), ownerId:t.string().index('btree'), name:t.string(), variety:t.string(),
   category:t.string(), condition:t.string(), quantity:t.string(), storage:t.string(),
   photoBase64:t.string(), identification:t.string(), confidence:t.f64(), scannedAt:t.u64(),
-  listingID:t.string(), deviceID:t.string(),
+  listingID:t.string(), deviceID:t.string(), analysis:t.string().default(''),
 });
 const storageReadings = table({name:'storage_readings'}, {
   id:t.string().primaryKey(), ownerId:t.string().index('btree'), itemID:t.string(), deviceID:t.string(),
-  temperature:t.f64(), humidity:t.f64(), light:t.f64(), recordedAt:t.u64(),
+  temperature:t.f64(), humidity:t.f64(), light:t.f64(), recordedAt:t.u64(), lightUnit:t.string().default('lux'),
 });
-const db = schema({ foodInventory, storageReadings, identifiers, rateLimits, databaseOwner, users, userIdentities, userPreferences, listings, mediaAssets, listingMedia,
+const geminiConfiguration = table({name:'gemini_configuration'}, {id:t.string().primaryKey(), key:t.string(), model:t.string()});
+const db = schema({ geminiConfiguration, foodInventory, storageReadings, identifiers, rateLimits, databaseOwner, users, userIdentities, userPreferences, listings, mediaAssets, listingMedia,
   pickupLocations, listingPickupWindows, listingAttestations, tags, listingTags, listingSearchTerms,
   searchTermStats, carts, cartItems, reservations, inventoryClaims, pickupRuns, pickupStops,
   pickupStopItems, pickupScheduleChanges, conversations, conversationMembers, messages,

@@ -15,7 +15,9 @@ import SwiftUI
     @State private var scanner = FoodScanController()
     var body: some Scene {
         WindowGroup {
-            RootView().environment(store).environment(router).environment(location).environment(scanner).preferredColorScheme(.light)
+            RootView().environment(store).environment(router).environment(location).environment(
+                scanner
+            ).preferredColorScheme(.light)
         }
     }
 }
@@ -30,6 +32,7 @@ struct RootView: View {
     @State private var welcomePreviewDismissed = false
     @Environment(\.scenePhase) private var scenePhase
     @State private var showOnboarding = false
+    @State private var accountPhoto: UIImage?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -39,8 +42,11 @@ struct RootView: View {
                 Label {
                     Text("Discover")
                 } icon: {
-                    Image(uiImage: NavigationArtwork.tabIcon(.discover, selected: router.tab == .discover))
-                        .renderingMode(.original)
+                    Image(
+                        uiImage: NavigationArtwork.tabIcon(
+                            .discover, selected: router.tab == .discover)
+                    )
+                    .renderingMode(.original)
                 }
             }
             .tag(AppTab.discover)
@@ -57,15 +63,19 @@ struct RootView: View {
                 Label {
                     Text("Scan")
                 } icon: {
-                    Image(uiImage: NavigationArtwork.tabIcon(.scan, selected: router.tab == .scan)).renderingMode(.original)
+                    Image(uiImage: NavigationArtwork.tabIcon(.scan, selected: router.tab == .scan))
+                        .renderingMode(.original)
                 }
             }.tag(AppTab.scan)
             NavigationStack { MessagesView() }.tabItem {
                 Label {
                     Text("Messages")
                 } icon: {
-                    Image(uiImage: NavigationArtwork.tabIcon(.messages, selected: router.tab == .messages))
-                        .renderingMode(.original)
+                    Image(
+                        uiImage: NavigationArtwork.tabIcon(
+                            .messages, selected: router.tab == .messages)
+                    )
+                    .renderingMode(.original)
                 }
             }.tag(AppTab.messages)
             NavigationStack { ProfileView() }.tabItem {
@@ -73,12 +83,18 @@ struct RootView: View {
                     Text("You")
                 } icon: {
                     Image(
-                        uiImage: NavigationArtwork.tabIcon(.profile, selected: router.tab == .you)
+                        uiImage: NavigationArtwork.accountIcon(accountPhoto, name: store.profileName, selected: router.tab == .you)
                     )
                     .renderingMode(.original)
                 }
             }.tag(
                 AppTab.you)
+        }.task(id: store.profileAvatar) {
+            accountPhoto = nil
+            if let avatar = store.profileAvatar, !avatar.isEmpty {
+                let image = try? await ImagePipeline.shared.image(avatar)
+                if !Task.isCancelled { accountPhoto = image }
+            } else if !store.isBackend { accountPhoto = UIImage(named: "profile") }
         }.task {
             let args = ProcessInfo.processInfo.arguments
             #if DEBUG
@@ -91,7 +107,9 @@ struct RootView: View {
             {
                 store.enterBackendMode()
                 do {
-                    if SessionController.shared.isLocalBackend && SessionController.shared.current == nil {
+                    if SessionController.shared.isLocalBackend
+                        && SessionController.shared.current == nil
+                    {
                         try await SessionController.shared.loadDemoAccounts()
                     }
                     #if DEBUG
@@ -109,13 +127,23 @@ struct RootView: View {
                     store.notice = error.localizedDescription
                 }
             }
-        }.task(id: SessionController.shared.current?.userId) {
+        }.task(id: "\(SessionController.shared.current?.userId ?? "")-\(SessionController.shared.profileRevision)") {
             guard store.isBackend, !SessionController.shared.isLocalBackend else { return }
-            guard SessionController.shared.current != nil else { store.disconnectBackend(); return }
+            guard SessionController.shared.current != nil else {
+                store.disconnectBackend()
+                return
+            }
             do {
                 _ = try await SessionController.shared.currentSession()
                 await store.connect(try SessionController.shared.repository())
-            } catch { store.notice = error.localizedDescription }
+                try? await SessionController.shared.syncProfile()
+                await store.refreshBackend(force: true)
+            } catch {
+                // Only an explicit Sign out clears the saved account and its data.
+                if !Task.isCancelled && !SessionController.shared.needsSignIn {
+                    store.notice = error.localizedDescription
+                }
+            }
         }.overlay {
             if store.isBackend && !SessionController.shared.isLocalBackend
                 && SessionController.shared.current == nil
@@ -129,14 +157,19 @@ struct RootView: View {
             }
         }.overlay {
             #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("--welcome-preview") && !welcomePreviewDismissed {
+                if ProcessInfo.processInfo.arguments.contains("--welcome-preview")
+                    && !welcomePreviewDismissed
+                {
                     WelcomeView { welcomePreviewDismissed = true }
                 }
             #endif
-        }.onChange(of: store.accountID) { _, _ in scanner.reset() }
-        .task(id: "\(scenePhase)-\(store.isBackend)-\(store.accountID)") {
-            if scenePhase == .active { await store.pollBackend() }
-        }.tint(Theme.ink).background(Theme.ivory.ignoresSafeArea())
+        }.onChange(of: store.accountID, initial: true) { _, _ in
+            scanner.reset()
+            scanner.bindStorageHistory(store)
+        }
+            .task(id: "\(scenePhase)-\(store.isBackend)-\(store.accountID)") {
+                if scenePhase == .active { await store.pollBackend() }
+            }.tint(Theme.ink).background(Theme.ivory.ignoresSafeArea())
             .toolbarBackground(Theme.paper, for: .tabBar).toolbarBackground(.visible, for: .tabBar)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if store.runActive {
@@ -150,12 +183,33 @@ struct RootView: View {
                 }
             }
             .overlay(alignment: .top) {
-                if let notice = store.notice {
-                    Text(notice).rescueFont(14, .medium).foregroundStyle(Theme.paper).padding(14)
-                        .frame(maxWidth: .infinity).background(
-                            Theme.ink.opacity(0.96), in: RoundedRectangle(cornerRadius: 20)
-                        ).padding(.horizontal, 16)
-                        .allowsHitTesting(false).transition(
+                if SessionController.shared.needsSignIn {
+                    HStack {
+                        Text("Reconnect your account").rescueFont(14, .semibold)
+                        Spacer()
+                        Button("Sign in again") { Task { await SessionController.shared.signIn() } }
+                            .rescueFont(14, .semibold).foregroundStyle(Theme.save)
+                    }.padding(16).card(radius: 20).padding(.horizontal, 16)
+                } else if let notice = store.notice {
+                    HStack(spacing: 10) {
+                        Image(systemName: notice == "Added to cart" ? "checkmark.circle.fill" : "info.circle")
+                            .foregroundStyle(Theme.save)
+                        Text(notice).rescueFont(14, .medium)
+                        Spacer(minLength: 8)
+                        Button { withAnimation(Theme.spring) { store.notice = nil } } label: {
+                            Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
+                                .frame(width: 32, height: 32)
+                        }.buttonStyle(.plain).accessibilityLabel("Dismiss notification")
+                    }.foregroundStyle(Theme.ink).padding(12)
+                        .background(Theme.paper, in: RoundedRectangle(cornerRadius: 20))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Theme.line, lineWidth: 1))
+                        .shadow(color: Theme.deep.opacity(0.1), radius: 16, y: 6)
+                        .padding(.horizontal, 16)
+                        .gesture(DragGesture(minimumDistance: 15).onEnded { value in
+                            if abs(value.translation.width) > 35 || value.translation.height < -20 {
+                                withAnimation(Theme.spring) { store.notice = nil }
+                            }
+                        }).transition(
                             .move(edge: .top).combined(with: .opacity)
                         )
                         .task(id: notice) {
@@ -198,7 +252,8 @@ struct RootView: View {
             }
             .onChange(of: location.selection, initial: true) { _, selection in
                 if let selection, !ProcessInfo.processInfo.arguments.contains("--uitesting") {
-                    store.updateBrowseLocation(latitude: selection.latitude, longitude: selection.longitude)
+                    store.updateBrowseLocation(
+                        latitude: selection.latitude, longitude: selection.longitude)
                 }
             }
             .onChange(of: scenePhase, initial: true) { _, phase in
@@ -232,6 +287,10 @@ struct RootView: View {
 
 struct SheetHost: View {
     @Environment(AppRouter.self) private var router
+    private var showsCloseButton: Bool {
+        if case .location? = router.sheet { return false }
+        return true
+    }
     var body: some View {
         NavigationStack {
             Group {
@@ -252,13 +311,15 @@ struct SheetHost: View {
                 }
             }.background(Theme.ivory).foregroundStyle(Theme.ink)
                 .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            router.sheet = nil
-                        } label: {
-                            Image(systemName: "xmark")
+                    if showsCloseButton {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button {
+                                router.sheet = nil
+                            } label: {
+                                Image(systemName: "xmark")
+                            }
+                            .accessibilityLabel("Close").accessibilityIdentifier("close-sheet")
                         }
-                        .accessibilityLabel("Close").accessibilityIdentifier("close-sheet")
                     }
                 }.toolbarBackground(Theme.ivory, for: .navigationBar).toolbarBackground(
                     .visible, for: .navigationBar)

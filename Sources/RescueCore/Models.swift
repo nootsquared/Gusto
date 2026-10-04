@@ -46,6 +46,9 @@ public struct Listing: Identifiable, Hashable, Codable, Sendable {
     public var imageURL: String? = nil
     public var version: Int? = nil
     public var windows: [PickupWindow]? = nil
+    public var latitude: Double? = nil
+    public var longitude: Double? = nil
+    public var storageConditions: RecordedStorageConditions? = nil
     public var image: String {
         if let imageURL { return imageURL.isEmpty ? "unavailable-photo" : imageURL }
         return id == "my-granola" ? "gran" : id
@@ -131,7 +134,7 @@ public struct Receipt: Identifiable, Codable, Sendable {
 }
 
 public struct Filters: Equatable, Codable, Sendable {
-    public var distance: Double = 0.8
+    public var distance: Double = 3.0
     public var maxPrice: Int = 1500
     public var freshness: Set<Freshness> = []
     public var categories: Set<String> = []
@@ -201,4 +204,15 @@ public enum ListingPublishPolicy {
         let end = calendar.date(byAdding: .hour, value: endHour, to: day)!
         return (start.timeIntervalSince1970 * 1000, end.timeIntervalSince1970 * 1000)
     }
+}
+
+/// Snapshot of real, matching sensor history at publication; not a safety certification.
+public struct RecordedStorageConditions: Hashable, Codable, Sendable {
+    public let sampleCount: Int
+    public let light: Double?
+    public let lightUnit: String?
+    public let temperature: Double
+    public let humidity: Double
+    public let from: Double
+    public let until: Double
 }

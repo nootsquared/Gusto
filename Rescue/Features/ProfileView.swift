@@ -12,12 +12,12 @@ struct ProfileView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 HStack(spacing: 16) {
-                    FoodPhoto(name: "profile").frame(width: 72, height: 72).clipShape(Circle())
+                    AccountAvatar(size: 72)
                     VStack(alignment: .leading, spacing: 6) {
                         Text(store.profileName).rescueFont(26, .bold)
                         Text(
                             store.isBackend
-                                ? "Local demo account · \(store.receipts.count) completed purchases"
+                                ? "\(store.receipts.count) completed purchases"
                                 : "4.9 · 24 pickups · Student verified"
                         ).rescueFont(13).foregroundStyle(
                             Theme.secondary)
@@ -26,7 +26,7 @@ struct ProfileView: View {
                 Button {
                     router.sheet = .profile(.impact)
                 } label: {
-                    ImpactHero(totals: store.impact)
+                    ImpactHero(totals: store.impact, earnings: store.earnings)
                 }.buttonStyle(.plain)
                 Button {
                     router.sheet = .profile(.referrals)
@@ -86,6 +86,7 @@ struct ProfileView: View {
 
 struct ImpactHero: View {
     let totals: Totals
+    let earnings: Int
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -105,7 +106,7 @@ struct ImpactHero: View {
                 }
                 Spacer()
                 VStack(alignment: .leading) {
-                    Text("$82").rescueFont(20, .semibold)
+                    Text(Money.text(earnings)).rescueFont(20, .semibold)
                     Text("earned").rescueFont(13).foregroundStyle(Theme.paper.opacity(0.6))
                 }
                 Spacer()

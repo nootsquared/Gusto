@@ -1,4 +1,4 @@
-import MapKit
+@preconcurrency import MapKit
 import PhotosUI
 import SwiftUI
 
@@ -15,7 +15,7 @@ struct ScanView: View {
             VStack(alignment: .leading, spacing: 24) {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Scan an item.").rescueFont(34, .bold).tracking(-1.2)
+                        Text("Your food").rescueFont(34, .bold).tracking(-1.2)
                         Text("Know what you have. Make the most of it.")
                             .rescueFont(14).foregroundStyle(Theme.secondary)
                     }
@@ -54,13 +54,13 @@ struct ScanView: View {
                         }.frame(width: 180, height: 190)
                     }.padding(.trailing, 14).padding(.bottom, 92).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 12) {
-                        Image(systemName: "viewfinder").font(.system(size: 38, weight: .light))
-                            .padding(.bottom, 26)
-                        Text("Your food,\nin focus.").rescueFont(25, .bold).tracking(
+                        Image(systemName: "camera.viewfinder").font(.system(size: 64, weight: .medium))
+                            .padding(.bottom, 12)
+                        Text("Keep track\nof your food.").rescueFont(25, .bold).tracking(
                             -0.5
                         )
                         .frame(width: 140, alignment: .leading)
-                        Text("Scan. Save. Share.").rescueFont(13).foregroundStyle(
+                        Text("Take a photo to add an item.").rescueFont(13).foregroundStyle(
                             .white.opacity(0.8))
                         Button {
                             Haptic.tap()
@@ -111,13 +111,11 @@ struct ScanView: View {
                             Text(
                                 scanner.sensor.connected == nil
                                     ? "Connect to monitor your food"
-                                    : "Bluetooth connected · setup pending"
+                                    : scanner.sensor.status
                             )
                             .rescueFont(12).foregroundStyle(Theme.secondary)
                         }
                         Spacer(minLength: 0)
-                        Circle().fill(scanner.sensor.connected == nil ? Theme.muted : Theme.save)
-                            .frame(width: 7, height: 7)
                         Image(systemName: "chevron.right").font(
                             .system(size: 12, weight: .semibold)
                         ).foregroundStyle(Theme.muted)
@@ -132,10 +130,10 @@ struct ScanView: View {
                             Theme.secondary)
                     }
                     HStack(spacing: 6) {
-                        inventoryFilter("My collection", selected: !listedOnly) {
+                        inventoryFilter("My collection", count: store.inventory.filter { !$0.isListed }.count, selected: !listedOnly) {
                             listedOnly = false
                         }
-                        inventoryFilter("For sale", selected: listedOnly) { listedOnly = true }
+                        inventoryFilter("For sale", count: store.inventory.filter { $0.isListed }.count, selected: listedOnly) { listedOnly = true }
                     }.padding(5).background(Theme.bone, in: Capsule())
                     if store.inventoryLoading {
                         ProgressView().frame(maxWidth: .infinity).padding(24)
@@ -180,10 +178,12 @@ struct ScanView: View {
                                             ).padding(10)
                                         }
                                         Text(item.title).rescueFont(16, .semibold).lineLimit(2)
-                                        Text(
-                                            item.deviceID.isEmpty
-                                                ? "Not monitored" : "Sensor linked"
-                                        ).rescueFont(12).foregroundStyle(Theme.secondary)
+                                        if let estimate = FoodQualityEstimate.estimate(item, readings: store.storageReadings) {
+                                            Text(estimate.label).rescueFont(12, .semibold).foregroundStyle(Theme.save)
+                                        } else {
+                                            Text(item.deviceID.isEmpty ? "Not monitored" : "Waiting for sensor history")
+                                                .rescueFont(12).foregroundStyle(Theme.secondary)
+                                        }
                                     }.foregroundStyle(Theme.ink)
                                 }.buttonStyle(.plain).accessibilityIdentifier(
                                     "inventory-\(item.id)")
@@ -206,7 +206,7 @@ struct ScanView: View {
                             return
                         }
                         router.sheet = .scanReview
-                        await scanner.identify(image)
+                        await scanner.identify(image, store: store)
                         photo = nil
                     } catch { scanner.error = "That photo couldn't be opened. Try another." }
                 }
@@ -228,15 +228,18 @@ struct ScanView: View {
     private var visibleItems: [InventoryFood] {
         store.inventory.filter { listedOnly ? $0.isListed : !$0.isListed }
     }
-    private func inventoryFilter(_ title: String, selected: Bool, action: @escaping () -> Void)
+    private func inventoryFilter(_ title: String, count: Int, selected: Bool, action: @escaping () -> Void)
         -> some View
     {
         Button {
             withAnimation(Theme.spring) { action() }
         } label: {
-            Text(title).rescueFont(13, .semibold).foregroundStyle(
-                selected ? Theme.deep : Theme.secondary
-            )
+            HStack(spacing: 7) {
+                Text(title).rescueFont(13, .semibold)
+                Text("\(count)").rescueFont(11, .semibold).monospacedDigit()
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Theme.deep.opacity(0.08), in: Capsule())
+            }.foregroundStyle(selected ? Theme.deep : Theme.secondary)
             .frame(maxWidth: .infinity).padding(.vertical, 11).background(
                 selected ? Theme.paper : .clear, in: Capsule())
         }.buttonStyle(.plain)
@@ -262,6 +265,7 @@ struct InventoryPhoto: View {
 }
 
 struct ScanCameraHost: View {
+    @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
     @Environment(FoodScanController.self) private var scanner
     var body: some View {
@@ -271,7 +275,7 @@ struct ScanCameraHost: View {
                 return
             }
             router.sheet = .scanReview
-            Task { await scanner.identify(image) }
+            Task { await scanner.identify(image, store: store) }
         }.ignoresSafeArea()
     }
 }
@@ -288,12 +292,26 @@ struct ScanReviewView: View {
             VStack(alignment: .leading, spacing: 20) {
                 InventoryPhoto(item: scanner.draft).frame(height: 240).clipShape(
                     RoundedRectangle(cornerRadius: 26))
+                if !scanner.originalPhotoBase64.isEmpty && scanner.draft.photoBase64 != scanner.originalPhotoBase64 {
+                    Button("Use full photo") { scanner.draft.photoBase64 = scanner.originalPhotoBase64 }
+                        .rescueFont(13, .semibold).foregroundStyle(Theme.save)
+                }
                 if scanner.analyzing {
                     HStack(spacing: 12) {
                         ProgressView()
                         Text("Taking a closer look…").rescueFont(17, .semibold)
                     }.padding(20)
                 } else {
+                    if let error = scanner.error {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Photo analysis unavailable").rescueFont(16, .semibold)
+                            Text(error).rescueFont(13).foregroundStyle(Theme.secondary)
+                            Button("Try Gemini again") {
+                                guard let data = Data(base64Encoded: scanner.originalPhotoBase64), let image = UIImage(data: data) else { return }
+                                Task { await scanner.identify(image, store: store) }
+                            }.rescueFont(14, .semibold).foregroundStyle(Theme.save)
+                        }.padding(18).card(radius: 20)
+                    }
                     VStack(alignment: .leading, spacing: 7) {
                         Text(
                             scanner.draft.name.isEmpty
@@ -301,11 +319,16 @@ struct ScanReviewView: View {
                                 : "Looks like \(scanner.draft.name.lowercased())."
                         ).rescueFont(27, .bold).tracking(-0.6)
                         Text(
-                            scanner.draft.identification == "Apple Vision"
+                            scanner.draft.identification == "Gemini"
+                                ? "Suggested from your photo · check the details before saving."
+                                : scanner.draft.identification == "Apple Vision"
                                 ? "On-device suggestion · confirm the food and variety below."
                                 : "Add the food name. Variety and condition need your review."
                         )
                         .rescueFont(14).foregroundStyle(Theme.secondary)
+                    }
+                    if let analysis = scanner.draft.scanAnalysis {
+                        Text(analysis.description).rescueFont(14).foregroundStyle(Theme.secondary)
                     }
                     VStack(spacing: 16) {
                         scanField(
@@ -317,6 +340,9 @@ struct ScanReviewView: View {
                         scanField(
                             "Quantity", text: $scanner.draft.quantity,
                             placeholder: "e.g. 3 tomatoes", id: "scan-quantity")
+                        Picker("Category", selection: $scanner.draft.category) {
+                            ForEach(["Produce", "Dairy", "Bakery", "Pantry", "Breakfast", "Snacks", "Prepared"], id: \.self) { Text($0).tag($0) }
+                        }.rescueFont(15)
                         Picker("Condition", selection: $scanner.draft.condition) {
                             ForEach(["Not assessed", "Unripe", "Ripe", "Use soon"], id: \.self) {
                                 Text($0).tag($0)
@@ -417,13 +443,13 @@ struct InventoryDetailView: View {
                                 icon: "humidity")
                             sensorMetric(
                                 "Light",
-                                value: summary.map { String(format: "%.0f lx", $0.light) } ?? "—",
+                                value: summary.map { String(format: "%.0f %@", $0.light, $0.lightUnit) } ?? "—",
                                 icon: "sun.max")
                         }
                         Text(
                             summary == nil
                                 ? "Connect a sensor and link this item to record its storage conditions."
-                                : "Recent 3-day average · \(summary!.count) samples. Historical readings aren't live monitoring."
+                                : "Average of \(summary!.count) recent samples · synced about once a minute."
                         )
                         .rescueFont(13).foregroundStyle(Theme.secondary)
                         Button {
@@ -432,15 +458,26 @@ struct InventoryDetailView: View {
                             Label("Connect a storage sensor", systemImage: "wave.3.right")
                                 .rescueFont(14, .semibold).foregroundStyle(Theme.save)
                         }
-                        if let connected = scanner.sensor.connected, !item.isListed,
-                            item.deviceID != connected.identifier.uuidString
-                        {
-                            Button("Link to \(connected.name ?? "sensor")") {
-                                var updated = item
-                                updated.deviceID = connected.identifier.uuidString
-                                Task { _ = await store.saveInventoryFood(updated) }
-                            }.rescueFont(14, .semibold).foregroundStyle(Theme.save)
-                        }
+                        Button {
+                            if !item.deviceID.isEmpty {
+                                Task { await store.trackInventoryFood(item.id, deviceID: "") }
+                            } else if let device = scanner.sensor.connected {
+                                Task { await store.trackInventoryFood(item.id, deviceID: device.identifier.uuidString) }
+                            } else { router.sheet = .sensor }
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: item.deviceID.isEmpty ? "square" : "checkmark.square.fill")
+                                    .font(.system(size: 22, weight: .medium)).foregroundStyle(Theme.save)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Track with sensor").rescueFont(15, .semibold)
+                                    Text(item.deviceID.isEmpty ? "Link this item to your storage sensor" : "Recording while the sensor is connected")
+                                        .rescueFont(12).foregroundStyle(Theme.secondary)
+                                }
+                                Spacer()
+                            }.padding(14).background(Theme.soft, in: RoundedRectangle(cornerRadius: 16))
+                        }.buttonStyle(.plain).disabled(store.backendBusy)
+                            .accessibilityIdentifier("track-with-sensor")
+                            .accessibilityValue(item.deviceID.isEmpty ? "Off" : "On")
                     }.padding(18).card(radius: 24)
                     if let guide = FoodStorageGuide.forFood(item) {
                         VStack(alignment: .leading, spacing: 12) {
@@ -455,14 +492,25 @@ struct InventoryDetailView: View {
                             ).rescueFont(12, .semibold).foregroundStyle(Theme.sage)
                         }.padding(18).background(Theme.soft, in: RoundedRectangle(cornerRadius: 24))
                     }
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text("Freshness outlook").rescueFont(19, .semibold)
-                        Text("No expiry prediction yet").rescueFont(15, .semibold).foregroundStyle(
-                            Theme.secondary)
-                        Text(
-                            "A calibrated model needs the food’s condition and sensor history. A photo alone doesn't verify freshness or food safety."
-                        )
-                        .rescueFont(13).foregroundStyle(Theme.secondary)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Estimated quality window").rescueFont(19, .semibold)
+                        if let estimate = FoodQualityEstimate.estimate(item, readings: store.storageReadings) {
+                            Text(estimate.label).rescueFont(29, .bold).foregroundStyle(Theme.save)
+                            let lastDay = Date().addingTimeInterval(estimate.daysMax * 86400)
+                            Text("Check by \(lastDay.formatted(date: .abbreviated, time: .omitted))")
+                                .rescueFont(14, .semibold)
+                            Text("Based on \(estimate.samples) readings averaging \(String(format: "%.1f°C", estimate.temperature)) and \(Int(estimate.humidity))% humidity.")
+                                .rescueFont(13).foregroundStyle(Theme.secondary)
+                        } else {
+                            Text(item.deviceID.isEmpty ? "Link a sensor to see an estimate" : "Waiting for usable food and sensor data")
+                                .rescueFont(15, .semibold).foregroundStyle(Theme.secondary)
+                        }
+                        if let a = item.scanAnalysis {
+                            Text("Suggested storage: \(Int(a.idealTemperatureMin))–\(Int(a.idealTemperatureMax))°C · \(Int(a.idealHumidityMin))–\(Int(a.idealHumidityMax))% RH")
+                                .rescueFont(13).foregroundStyle(Theme.secondary)
+                        }
+                        Text("An approximate quality guide, not a safety expiry date. Check the food and any label before eating.")
+                            .rescueFont(12).foregroundStyle(Theme.muted)
                     }.padding(18).card(radius: 24)
                     HStack {
                         Text(
@@ -521,52 +569,109 @@ struct InventoryDetailView: View {
     }
 }
 
+struct SensorLiveDashboard: View {
+    let stream: ClimateStream
+    let connected: Bool
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let fresh = connected && stream.isFresh(at: context.date)
+            let packet = fresh ? stream.packet : nil
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Live conditions").rescueFont(19, .semibold)
+                HStack(alignment: .top, spacing: 8) {
+                    metric(
+                        "Temperature", icon: "thermometer.medium",
+                        value: packet?.temperatureFahrenheit.map { String(format: "%.1f", $0) }
+                            ?? "—",
+                        unit: "°F",
+                        detail: packet?.temperatureCelsius.map { String(format: "%.1f °C", $0) }
+                            ?? "No reading",
+                        id: "sensor-temperature")
+                    metric(
+                        "Humidity", icon: "humidity",
+                        value: packet?.humidityPercent.map { String(format: "%.1f", $0) } ?? "—",
+                        unit: "% RH", detail: "Humidity level", id: "sensor-humidity")
+                    metric(
+                        "Light", icon: "sun.max",
+                        value: packet?.lightRawCount.map { String($0) } ?? "—",
+                        unit: "raw", detail: "Sensor count", id: "sensor-light")
+                }
+                Text(
+                    fresh
+                        ? "Updated every second · light is a raw sensor count."
+                        : connected && stream.packet != nil
+                            ? "No new sample for 5 seconds. Old readings are hidden until the stream resumes."
+                            : "Your readings will appear here when the sensor sends its first sample."
+                )
+                .rescueFont(12).foregroundStyle(Theme.secondary)
+            }.padding(18).card(radius: 24)
+        }
+    }
+    private func metric(
+        _ title: String, icon: String, value: String, unit: String,
+        detail: String, id: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: icon).font(.system(size: 18, weight: .medium)).foregroundStyle(
+                Theme.save)
+            Text(title).rescueFont(11, .medium).foregroundStyle(Theme.secondary).lineLimit(1)
+            Text(value).rescueFont(25, .semibold).monospacedDigit().lineLimit(1).minimumScaleFactor(
+                0.7
+            )
+            .contentTransition(.numericText()).accessibilityIdentifier(id)
+            Text(unit).rescueFont(12, .semibold).foregroundStyle(Theme.deep)
+            Text(detail).rescueFont(10).foregroundStyle(Theme.secondary).lineLimit(2)
+        }.frame(maxWidth: .infinity, minHeight: 132, maxHeight: 132, alignment: .topLeading)
+            .padding(10)
+            .background(Theme.soft.opacity(0.6), in: RoundedRectangle(cornerRadius: 16))
+            .animation(.easeOut(duration: 0.2), value: value)
+    }
+}
+
 struct SensorConnectionView: View {
     @Environment(FoodScanController.self) private var scanner
     var body: some View {
         let sensor = scanner.sensor
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                VStack(spacing: 20) {
-                    ZStack {
-                        Circle().stroke(Theme.sage.opacity(0.1), lineWidth: 1).frame(
-                            width: 190, height: 190)
-                        Circle().stroke(Theme.sage.opacity(0.18), lineWidth: 1).frame(
-                            width: 140, height: 140)
-                        Image(systemName: "sensor.tag.radiowaves.forward.fill").font(
-                            .system(size: 36, weight: .light)
-                        )
-                        .foregroundStyle(Theme.paper).frame(width: 88, height: 88)
+                HStack(alignment: .center, spacing: 16) {
+                    Image(systemName: "sensor.tag.radiowaves.forward.fill")
+                        .font(.system(size: 26, weight: .medium))
+                        .foregroundStyle(Theme.paper).frame(width: 66, height: 66)
                         .background(
                             LinearGradient(
                                 colors: [Theme.save, Theme.deep], startPoint: .topLeading,
-                                endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 28))
-                        if sensor.searching { ProgressView().tint(Theme.save).offset(y: 96) }
+                                endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 22))
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Your space, live.").rescueFont(25, .bold).tracking(-0.5)
+                        Text("Temperature, humidity and light. Direct from your storage sensor.")
+                            .rescueFont(13).foregroundStyle(Theme.secondary)
                     }
-                    Text("A closer eye\non your food.").rescueFont(30, .bold).tracking(-0.8)
-                        .multilineTextAlignment(.center)
-                    Text(
-                        "Pair your storage sensor to Gusto. Temperature, humidity and light will live alongside your items."
-                    )
-                    .rescueFont(15).foregroundStyle(Theme.secondary).multilineTextAlignment(.center)
-                }.frame(maxWidth: .infinity)
+                }.frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: 10) {
-                    Circle().fill(sensor.connected == nil ? Theme.muted : Theme.save).frame(
-                        width: 8, height: 8)
                     Text(sensor.status).rescueFont(14, .semibold)
                     Spacer()
                 }.padding(18).card(radius: 20)
+                SensorLiveDashboard(stream: sensor.stream, connected: sensor.connected != nil)
                 if let connected = sensor.connected {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(connected.name ?? "Storage sensor").rescueFont(19, .semibold)
                         Text(
-                            "Paired over Bluetooth. Sensor readings will appear once the firmware's data protocol is configured."
+                            "Connected to your Nano. Readings arrive about once a second while live monitoring is on."
                         )
                         .rescueFont(14).foregroundStyle(Theme.secondary)
                         Button("Disconnect", role: .destructive) { sensor.disconnect() }.rescueFont(
                             14)
                     }.padding(18).card(radius: 22)
                 } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Hold the blue button for 2 seconds", systemImage: "hand.tap")
+                            .rescueFont(15, .semibold).foregroundStyle(Theme.deep)
+                        Text(
+                            "On FREE-WILi, wait for BLE: PAIRING, then find and select MHacks Climate here. Disconnect LightBlue or any other app first."
+                        )
+                        .rescueFont(13).foregroundStyle(Theme.secondary)
+                    }.padding(18).background(Theme.soft, in: RoundedRectangle(cornerRadius: 20))
                     PrimaryButton(
                         title: sensor.searching ? "Looking for your sensor…" : "Find a device",
                         symbol: "wave.3.right", color: Theme.deep,
@@ -579,7 +684,7 @@ struct SensorConnectionView: View {
                             HStack(spacing: 12) {
                                 Image(systemName: "sensor.tag.radiowaves.forward").foregroundStyle(
                                     Theme.sage)
-                                Text(device.name ?? "Bluetooth device").rescueFont(16, .semibold)
+                                Text(device.name ?? "MHacks Climate").rescueFont(16, .semibold)
                                 Spacer()
                                 Image(systemName: "plus.circle").foregroundStyle(Theme.save)
                             }.padding(18).card(radius: 20).foregroundStyle(Theme.ink)
@@ -602,7 +707,12 @@ struct SensorConnectionView: View {
 struct ScanSellEditor: View {
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
+    @Environment(LocationController.self) private var location
     let item: InventoryFood
+    init(item: InventoryFood) {
+        self.item = item
+        _allergens = State(initialValue: item.scanAnalysis?.allergens ?? "")
+    }
     @State private var price = ""
     @State private var allergens = ""
     @State private var address = ""
@@ -613,6 +723,11 @@ struct ScanSellEditor: View {
     @State private var confirmations: Set<String> = []
     @State private var publishing = false
     @State private var finding = false
+    @State private var useDefaultLocation = true
+    @State private var addressMessage: String?
+    @State private var pickupLocationRequest = 0
+    private enum Field: Hashable { case price, allergens, address }
+    @FocusState private var focusedField: Field?
     @State private var error: String?
     private let safety = [
         "Stored safely", "Condition is accurate", "No signs of spoilage", "Allergens are declared",
@@ -643,43 +758,50 @@ struct ScanSellEditor: View {
                         Spacer()
                         Text("$").foregroundStyle(Theme.secondary)
                         TextField("0.00", text: $price).keyboardType(.decimalPad).frame(width: 90)
-                            .accessibilityIdentifier("scan-sell-price")
+                            .accessibilityIdentifier("scan-sell-price").focused($focusedField, equals: .price)
                     }
                     Divider()
                     TextField("Allergens · enter 'none known' if applicable", text: $allergens)
                         .rescueFont(14).accessibilityIdentifier("scan-sell-allergens")
-                    Text("Identification isn't verification. Check the item and its label.")
+                        .focused($focusedField, equals: .allergens)
+                    Text("Review the suggested details and check allergens on the packaging.")
                         .rescueFont(12).foregroundStyle(Theme.secondary)
                 }.padding(18).card(radius: 24)
                 VStack(alignment: .leading, spacing: 14) {
                     Text("Pickup location").rescueFont(19, .semibold)
-                    TextField("Enter an address", text: $address).rescueFont(15)
+                    Button {
+                        address = ""
+                        place = nil
+                        useDefaultLocation = true
+                        focusedField = nil
+                        pickupLocationRequest += 1
+                        location.useCurrentLocation()
+                    } label: {
+                        Label(location.locating && place == nil ? "Finding your location…" : "Use current location",
+                              systemImage: "location.fill")
+                            .rescueFont(14, .semibold).foregroundStyle(Theme.save)
+                    }.accessibilityIdentifier("scan-pickup-current-location")
+                    TextField("Or search an address", text: $address).rescueFont(15)
                         .accessibilityIdentifier("scan-pickup-address")
+                        .focused($focusedField, equals: .address)
                         .onChange(of: address) { _, _ in
+                            useDefaultLocation = false
                             place = nil
                             places = []
+                            addressMessage = nil
                         }
-                    Button(finding ? "Finding address…" : "Find address") {
-                        finding = true
-                        Task {
-                            let request = MKLocalSearch.Request()
-                            request.naturalLanguageQuery = address
-                            do {
-                                places = Array(
-                                    try await MKLocalSearch(request: request).start().mapItems
-                                        .prefix(5))
-                            } catch {
-                                self.error =
-                                    "Couldn't find that address. Try a full street address."
-                            }
-                            finding = false
-                        }
-                    }.rescueFont(14, .semibold).foregroundStyle(Theme.save).disabled(
-                        finding || address.isEmpty)
+                    if finding { ProgressView().tint(Theme.save) }
+                    if let addressMessage {
+                        Text(addressMessage).rescueFont(12).foregroundStyle(Theme.secondary)
+                    } else if useDefaultLocation, let message = location.message {
+                        Text(message).rescueFont(12).foregroundStyle(Theme.secondary)
+                    }
                     ForEach(Array(places.enumerated()), id: \.offset) { index, candidate in
                         Button {
+                            useDefaultLocation = false
                             place = candidate
                             places = []
+                            focusedField = nil
                         } label: {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(candidate.name ?? "Address").rescueFont(14, .semibold)
@@ -691,11 +813,11 @@ struct ScanSellEditor: View {
                     }
                     if let place {
                         Label(
-                            place.placemark.title ?? address, systemImage: "checkmark.circle.fill"
+                            place.placemark.title ?? place.name ?? "Current location", systemImage: "checkmark.circle.fill"
                         ).rescueFont(13).foregroundStyle(Theme.save)
                     }
                     Text(
-                        "Buyers get an approximate area. Your address is shared after pickup confirmation."
+                        "Your pickup pin appears on the map. The written address is shared after pickup confirmation."
                     ).rescueFont(12).foregroundStyle(Theme.secondary)
                 }.padding(18).card(radius: 24)
                 VStack(alignment: .leading, spacing: 14) {
@@ -724,7 +846,58 @@ struct ScanSellEditor: View {
                 }.padding(18).card(radius: 24)
             }.padding(20)
         }.background(Theme.ivory)
+            .scrollDismissesKeyboard(.interactively)
+            .task { location.requestInitially() }
+            .task(id: address) {
+                let query = address.trimmingCharacters(in: .whitespacesAndNewlines)
+                finding = false
+                guard query.count >= 2 else { return }
+                do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+                guard !Task.isCancelled else { return }
+                finding = true
+                let request = MKLocalSearch.Request()
+                request.naturalLanguageQuery = query
+                if let selection = location.selection {
+                    request.region = MKCoordinateRegion(
+                        center: CLLocationCoordinate2D(latitude: selection.latitude,
+                                                       longitude: selection.longitude),
+                        latitudinalMeters: 50000, longitudinalMeters: 50000)
+                }
+                let search = MKLocalSearch(request: request)
+                do {
+                    let response = try await withTaskCancellationHandler {
+                        try await search.start()
+                    } onCancel: { search.cancel() }
+                    guard !Task.isCancelled, place == nil else { finding = false; return }
+                    places = Array(response.mapItems.prefix(5))
+                    addressMessage = places.isEmpty ? "No matches. Try a full street address." : nil
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    addressMessage = "Address search is unavailable. Use your location or try again."
+                }
+                finding = false
+            }
+            .task(id: "\(pickupLocationRequest)-\(useDefaultLocation)-\(location.selection?.latitude ?? 0)-\(location.selection?.longitude ?? 0)") {
+                guard useDefaultLocation, address.isEmpty, let selection = location.selection else { return }
+                let coordinate = CLLocationCoordinate2D(latitude: selection.latitude,
+                                                        longitude: selection.longitude)
+                let fallback = MKMapItem(placemark: MKPlacemark(coordinate: coordinate))
+                fallback.name = location.usingGPS ? "Current location" : location.label
+                place = fallback
+                let geocoder = CLGeocoder()
+                let placemarks = try? await geocoder.reverseGeocodeLocation(
+                    CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude))
+                guard !Task.isCancelled, useDefaultLocation, address.isEmpty else { return }
+                if let placemark = placemarks?.first {
+                    place = MKMapItem(placemark: MKPlacemark(placemark: placemark))
+                }
+            }
             .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { focusedField = nil }
+                        .accessibilityIdentifier("scan-sell-keyboard-done")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         router.sheet = nil
@@ -751,7 +924,7 @@ struct ScanSellEditor: View {
                         Task {
                             if await store.sellInventoryFood(
                                 item, price: cents, allergens: allergens,
-                                pickupAddress: place.placemark.title ?? address,
+                                pickupAddress: place.placemark.title ?? place.name ?? "Current location",
                                 latitude: place.placemark.coordinate.latitude,
                                 longitude: place.placemark.coordinate.longitude,
                                 start: start, end: end, attestations: confirmations.count == 4)

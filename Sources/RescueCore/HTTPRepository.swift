@@ -148,7 +148,7 @@ public actor HTTPRepository: RescueRepository {
         let task = Task<APIResponse, Error> {
             var http = URLRequest(url: endpoint)
             http.httpMethod = "POST"
-            http.timeoutInterval = 15
+            http.timeoutInterval = request.action == "scan_analyze" ? 55 : 15
             http.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             http.setValue("application/json", forHTTPHeaderField: "Content-Type")
             let encoder = JSONEncoder()
@@ -202,7 +202,7 @@ public actor HTTPRepository: RescueRepository {
         let response = try await task.value
         transferredBytes += response.payload.count
         responseMilliseconds = Date().timeIntervalSince(started) * 1000
-        if request.operationId.isEmpty { try persist(response, request: request) }
+        if request.operationId.isEmpty && request.action != "scan_analyze" { try persist(response, request: request) }
         return response
     }
     public func pending() -> [APIRequest] {

@@ -1,7 +1,8 @@
 import { t, type InferSchema, type TransactionCtx, SenderError, Range } from 'spacetimedb/server';
 import db, {scheduledTasks} from './schema';
-import { Identity, ScheduleAt } from 'spacetimedb';
+import { Identity, ScheduleAt, TimeDuration } from 'spacetimedb';
 import { registeredClaims } from './auth';
+import { foodPrompt, foodSchema, validateFood } from './gemini';
 export default db;
 export const init = db.init(ctx => { ctx.db.databaseOwner.insert({ id:'owner', identity:ctx.sender }); });
 type Ctx = TransactionCtx<InferSchema<typeof db>>;
@@ -89,13 +90,22 @@ function listingProjection(ctx: Ctx, row: ReturnType<typeof listing>) {
   const windows = [...ctx.db.listingPickupWindows.listingId.filter(row.id)];
   const loc = windows[0] && ctx.db.pickupLocations.id.find(windows[0].locationId);
   return { id: row.id, name: row.title, price: row.price, retail: row.retail,
-    distance: loc ? distance(42.28, -83.74, loc.latitude, loc.longitude) : 0,
+    distance: loc ? distance(42.28, -83.74, loc.exactLatitude, loc.exactLongitude) : 0,
+    latitude:loc?.exactLatitude, longitude:loc?.exactLongitude,
     freshness: row.freshness, pickup: windows.some(w => w.start <= now(ctx) && w.end > now(ctx)) ? 'Available now · Pickup tonight' : 'Tomorrow',
     updated: new Date(Number(row.updated)).toISOString(), stale: now(ctx) - Number(row.updated) > 86400000,
     sellerID: row.sellerId, category: row.category, quantity: row.quantity, weight: row.grams / 453.59237,
     opened: row.opened, storage: row.storage, allergens: row.allergens, purchased: row.purchased,
     receipt: false, vegetarian: row.vegetarian, prepared: row.prepared, available: row.status === 'published',
+    storageConditions: row.storageConditions ? JSON.parse(row.storageConditions) : null,
     imageURL: mediaURL(ctx, row.id), version: row.version, windows: windows.map(w => ({ id: w.id, locationID: w.locationId, start: w.start, end: w.end, timezone: w.timezone })) };
+}
+function recordedStorage(ctx: Ctx, f: {id:string;ownerId:string;deviceID:string;scannedAt:bigint}) {
+  const samples=f.deviceID?[...ctx.db.storageReadings.ownerId.filter(f.ownerId)].filter(r=>r.itemID===f.id && r.deviceID===f.deviceID && Number(r.recordedAt)>=Math.max(Number(f.scannedAt),now(ctx)-259200000) && Number(r.recordedAt)<=now(ctx) && Number.isFinite(r.temperature) && r.temperature>=-30 && r.temperature<=60 && Number.isFinite(r.humidity) && r.humidity>=0 && r.humidity<=100).sort((a,b)=>Number(a.recordedAt-b.recordedAt)):[];
+  const average=(key:'temperature'|'humidity')=>samples.reduce((sum,r)=>sum+r[key],0)/samples.length;
+  const lightSamples=samples.filter(r=>r.lightUnit===samples[samples.length-1]?.lightUnit && Number.isFinite(r.light) && r.light>=0);
+  const conditions=samples.length?{light:lightSamples.length?lightSamples.reduce((sum,r)=>sum+r.light,0)/lightSamples.length:null,lightUnit:samples[samples.length-1]?.lightUnit??'raw',sampleCount:samples.length,temperature:average('temperature'),humidity:average('humidity'),from:Math.min(...samples.map(r=>Number(r.recordedAt))),until:Math.max(...samples.map(r=>Number(r.recordedAt)))}:null;
+  return conditions;
 }
 function distance(a: number, b: number, c: number, d: number) {
   const rad = Math.PI / 180; const x = (d - b) * rad * Math.cos((a + c) * rad / 2); const y = (c - a) * rad;
@@ -113,7 +123,7 @@ function runProjection(ctx: Ctx, user: string) {
   const run = [...ctx.db.pickupRuns.buyerId.filter(user)].filter(r => ['draft', 'active', 'finished'].includes(r.status)).sort((a,b) => Number(b.created - a.created))[0];
   if (!run) return null;
   return { ...run, stops: [...ctx.db.pickupStops.byRun.filter(run.id)].sort((a,b) => a.sequence-b.sequence).map(s => ({ ...s,
-    seller: sellerProjection(ctx, s.sellerId), items: [...ctx.db.pickupStopItems.stopId.filter(s.id)].map(i => listingProjection(ctx, listing(ctx, i.listingId))),
+    seller: {...sellerProjection(ctx, s.sellerId), latitude:ctx.db.pickupLocations.id.find(s.locationId)!.latitude, longitude:ctx.db.pickupLocations.id.find(s.locationId)!.longitude, area:ctx.db.pickupLocations.id.find(s.locationId)!.area}, items: [...ctx.db.pickupStopItems.stopId.filter(s.id)].map(i => listingProjection(ctx, listing(ctx, i.listingId))),
     privateLocation: s.status === 'confirmed' && [...ctx.db.pickupStopItems.stopId.filter(s.id)].every(i => !expired(ctx, i.reservationId)) ? { ...privateLocation(ctx, s.locationId), cacheUntil:Math.min(now(ctx)+900000,...[...ctx.db.pickupStopItems.stopId.filter(s.id)].map(i=>Number(ctx.db.reservations.id.find(i.reservationId)!.expires))) } : null,
   })) };
 }
@@ -143,6 +153,10 @@ function sendMessage(ctx: Ctx, user: string, id: string, text: string, operation
   ctx.db.conversations.id.update({ ...c, sequence: m.sequence, summary: m.text }); return m;
 }
 function tokens(text: string) { return [...new Set(text.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean))]; }
+function foodTokens(text: string) {
+  const singulars: Record<string,string> = {bananas:'banana',tomatoes:'tomato',potatoes:'potato',strawberries:'strawberry',blueberries:'blueberry',cherries:'cherry',peaches:'peach',apples:'apple',oranges:'orange',avocados:'avocado',grapes:'grape',pears:'pear',carrots:'carrot',cucumbers:'cucumber',peppers:'pepper',eggs:'egg',onions:'onion',mushrooms:'mushroom',beans:'bean',lentils:'lentil',chips:'chip',snacks:'snack'};
+  return [...new Set(tokens(text).flatMap(word=>singulars[word]?[word,singulars[word]]:[word]))];
+}
 function indexListing(ctx: Ctx, row: ReturnType<typeof listing>) {
   for (const p of ctx.db.listingSearchTerms.listingId.filter(row.id)) {
     ctx.db.listingSearchTerms.id.delete(p.id);
@@ -151,13 +165,13 @@ function indexListing(ctx: Ctx, row: ReturnType<typeof listing>) {
   }
   if (row.status !== 'published') return;
   const labels=[...ctx.db.listingTags.listingId.filter(row.id)].map(l=>ctx.db.tags.id.find(l.tagId)?.label??'').join(' ');
-  for (const token of tokens(`${labels} ${row.title} ${row.category} ${row.vegetarian ? 'vegetarian' : ''} ${row.opened ? '' : 'unopened'}`)) {
+  for (const token of foodTokens(`${labels} ${row.title} ${row.category} ${row.vegetarian ? 'vegetarian' : ''} ${row.opened ? '' : 'unopened'}`)) {
     ctx.db.listingSearchTerms.insert({ id: `${row.id}:${token}`, listingId: row.id, area: row.area, token, created: row.created, creationOrder: row.creationOrder });
     const id = `${row.area}:${token}`; const s = ctx.db.searchTermStats.id.find(id);
     if (s) ctx.db.searchTermStats.id.update({ ...s, count: s.count + 1 }); else ctx.db.searchTermStats.insert({ id, count: 1 });
   }
 }
-function discover(ctx: Ctx, q: RequestData) {
+function discover(ctx: Ctx, q: RequestData, user: string) {
   const spec = JSON.parse(q.text || '{}') as { query?: string; area?: string; maxPrice?: number; freshness?: string[]; categories?: string[]; vegetarian?: boolean; unopened?: boolean; tonight?: boolean; tomorrow?: boolean; minimumRating?: number; distance?: number; latitude?: number; longitude?: number };
   const query = (spec.query || '').toLowerCase().replace(/\s+/g, ' ').trim();
   const area = spec.area || '';
@@ -183,14 +197,14 @@ function discover(ctx: Ctx, q: RequestData) {
     if (!l) continue;
     if (l.creationOrder === afterOrder && l.id <= afterID) continue;
     scanned++; lastOrder = l.creationOrder; lastID = l.id;
-    if (l.status !== 'published' || l.price > maxPrice || (spec.vegetarian && !l.vegetarian) || (spec.unopened && l.opened)) continue;
+    if (l.sellerId === user || l.status !== 'published' || l.price > maxPrice || (spec.vegetarian && !l.vegetarian) || (spec.unopened && l.opened)) continue;
     if (spec.freshness?.length && !spec.freshness.includes(l.freshness)) continue;
     if (spec.categories?.length && !spec.categories.includes(l.category)) continue;
     const labels=[...ctx.db.listingTags.listingId.filter(l.id)].map(link=>ctx.db.tags.id.find(link.tagId)?.label??'').join(' ');
-    if (!words.every(w => tokens(`${labels} ${l.title} ${l.category} ${l.vegetarian ? 'vegetarian' : ''} ${l.opened ? '' : 'unopened'}`).includes(w))) continue;
+    if (!words.every(w => foodTokens(`${labels} ${l.title} ${l.category} ${l.vegetarian ? 'vegetarian' : ''} ${l.opened ? '' : 'unopened'}`).includes(w))) continue;
     const p = listingProjection(ctx, l); const s = sellerProjection(ctx, l.sellerId);
     const pickupLoc=p.windows[0] && ctx.db.pickupLocations.id.find(p.windows[0].locationID);
-    p.distance = distance(spec.latitude ?? 42.28, spec.longitude ?? -83.74, pickupLoc?.latitude??s.latitude, pickupLoc?.longitude??s.longitude);
+    p.distance = distance(spec.latitude ?? 42.28, spec.longitude ?? -83.74, pickupLoc?.exactLatitude??s.latitude, pickupLoc?.exactLongitude??s.longitude);
     if (p.distance > (spec.distance ?? 100) || s.rating < (spec.minimumRating ?? 0)) continue;
     if (query.includes('north campus') && !s.area.toLowerCase().includes('north')) continue;
     const windows = p.windows;
@@ -221,6 +235,10 @@ function invalidateDraft(ctx: Ctx, user: string) {
 }
 function process(ctx: Ctx, user: string, q: RequestData): unknown {
   switch (q.action) {
+    case 'profile_photo': {
+      if(!/^https:\/\/[^\s]+$/.test(q.text)||q.text.length>2000)fail('invalid_transition');
+      const profile=ctx.db.users.id.find(user)!;ctx.db.users.id.update({...profile,avatar:q.text});return {};
+    }
     case 'bootstrap': {
       for (const r of ctx.db.reservations.byBuyer.filter(user)) if (['held','booked'].includes(r.status) && r.expires <= now(ctx)) release(ctx,r.id,'expired');
       const items = [...ctx.db.cartItems.buyerId.filter(user)].filter(i => !i.reservationId || !expired(ctx, i.reservationId));
@@ -228,14 +246,15 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
         cart: items.map(i => i.listingId), cartListings: items.map(i => listingProjection(ctx,listing(ctx,i.listingId))),
         reservations: items.filter(i => i.reservationId).map(i => ctx.db.reservations.id.find(i.reservationId)),
         favorites: [...ctx.db.favorites.userId.filter(user)].map(f=>f.listingId),follows:[...ctx.db.follows.userId.filter(user)],
-        savedListings: [...ctx.db.favorites.userId.filter(user)].map(f=>ctx.db.listings.id.find(f.listingId)).filter((l): l is ReturnType<typeof listing> => !!l && l.status === 'published').map(l=>listingProjection(ctx,l)),
+        savedListings: [...ctx.db.favorites.userId.filter(user)].map(f=>ctx.db.listings.id.find(f.listingId)).filter((l): l is ReturnType<typeof listing> => !!l && l.status === 'published' && l.sellerId !== user).map(l=>listingProjection(ctx,l)),
         sellers: [...ctx.db.users.iter()].map(u=>sellerProjection(ctx,u.id)), run: runProjection(ctx,user),
         receipts: receiptsFor(ctx,user).slice(0,30), sales: receiptsFor(ctx,user,true).slice(0,30),
         ownListings: [...ctx.db.listings.bySeller.filter(user)].map(l=>listingProjection(ctx,l)),
         conversations: [...ctx.db.conversationMembers.userId.filter(user)].map(m=>ctx.db.conversations.id.find(m.conversationId)),
+        pickupRequests: ['waiting','confirmed'].flatMap(status=>[...ctx.db.pickupStops.bySeller.filter([user,status])]).filter(s=>{const r=ctx.db.pickupRuns.id.find(s.runId);return r && ['draft','active'].includes(r.status);}).map(s=>{const r=ctx.db.pickupRuns.id.find(s.runId)!;return {id:s.id,buyerId:s.buyerId,buyerName:ctx.db.users.id.find(s.buyerId)?.name??'Buyer',proposed:Number(s.proposed),status:s.status,phase:r.currentStop===s.sequence?r.phase:'scheduled',items:[...ctx.db.pickupStopItems.stopId.filter(s.id)].map(i=>listingProjection(ctx,listing(ctx,i.listingId)))};}),
         monthly: [...ctx.db.impactMonthly.userId.filter(user)], simulation: ctx.db.configuration.id.find('runtime')?.simulation ?? false };
     }
-    case 'feed': case 'search': case 'map': return discover(ctx,q);
+    case 'feed': case 'search': case 'map': return discover(ctx,q,user);
     case 'detail': {
       const l = listing(ctx,q.resourceId); if (l.status !== 'published' && l.sellerId !== user) fail('not_found');
       return { listing: listingProjection(ctx,l), seller: sellerProjection(ctx,l.sellerId) };
@@ -318,8 +337,13 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
       ctx.db.conversationMembers.id.update({...m,lastRead:Math.min(q.value,c.sequence)});return {};
     }
     case 'freshness': {
-      const l=listing(ctx,q.resourceId); if(l.status !== 'published')fail('unavailable');
-      return ctx.db.freshnessRequests.insert({id:uid(ctx),listingId:l.id,requesterId:user,sellerId:l.sellerId,status:'pending',created:stamp(ctx),responded:0n});
+      const l=listing(ctx,q.resourceId); if(l.status !== 'published' || l.sellerId===user)fail('unavailable');
+      const pending=[...ctx.db.freshnessRequests.sellerId.filter(l.sellerId)].find(f=>f.listingId===l.id && f.requesterId===user && f.status==='pending');
+      const f=pending??ctx.db.freshnessRequests.insert({id:uid(ctx),listingId:l.id,requesterId:user,sellerId:l.sellerId,status:'pending',created:stamp(ctx),responded:0n});
+      const c=conversation(ctx,user,l.sellerId,l.id), notificationId=`fresh-check-${f.id}`;
+      const notified=[...ctx.db.messages.byConversation.filter([c.id,new Range<number>({tag:'included',value:0})])].some(m=>m.operationId===notificationId);
+      if(!notified)sendMessage(ctx,user,c.id,`Hi! I'm requesting a Fresh Check for ${l.title}. Could you share a current photo and confirm its condition?`,notificationId);
+      return f;
     }
     case 'respond_freshness': {
       const f=ctx.db.freshnessRequests.id.find(q.resourceId);if(!f)fail('not_found');if(f.sellerId!==user)fail('unauthorized');
@@ -343,9 +367,10 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
         !Number.isFinite(f.confidence) || f.confidence<0 || f.confidence>1)fail('invalid_transition');
       if(!old && [...ctx.db.foodInventory.ownerId.filter(user)].length>=50)fail('invalid_transition');
       if(old?.listingID)fail('invalid_transition');
-      const item={id:q.resourceId,ownerId:user,name:f.name.trim(),variety:f.variety.trim(),category:'Produce',
+      const item={id:q.resourceId,ownerId:user,name:f.name.trim(),variety:f.variety.trim(),category:['Produce','Dairy','Bakery','Pantry','Breakfast','Snacks','Prepared'].includes(f.category)?f.category:'Produce',
         condition:f.condition,quantity:f.quantity.trim(),storage:f.storage,photoBase64:f.photoBase64,
-        identification:f.identification==='Apple Vision'?'Apple Vision':'Manual review',confidence:f.confidence,
+        identification:['Apple Vision','Gemini'].includes(f.identification)?f.identification:'Manual review',confidence:f.confidence,
+        analysis:typeof f.analysis==='string' && f.analysis.trim().length>0 && f.analysis.length<=10000?json(validateFood(JSON.parse(f.analysis))):'',
         scannedAt:old?.scannedAt??stamp(ctx),listingID:old?.listingID??'',deviceID:f.deviceID};
       if(old)ctx.db.foodInventory.id.update(item);else ctx.db.foodInventory.insert(item);return item;
     }
@@ -357,6 +382,10 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
       else {ctx.db.foodInventory.id.delete(item.id);for(const r of ctx.db.storageReadings.ownerId.filter(user))if(r.itemID===item.id)ctx.db.storageReadings.id.delete(r.id);}
       return {};
     }
+    case 'inventory_track': {
+      const item=ctx.db.foodInventory.id.find(q.resourceId);if(!item)fail('not_found');if(item.ownerId!==user)fail('unauthorized');
+      if(q.text.length>100)fail('invalid_transition');ctx.db.foodInventory.id.update({...item,deviceID:q.text});return {};
+    }
     case 'sensor_reading': {
       const item=ctx.db.foodInventory.id.find(q.resourceId);if(!item)fail('not_found');if(item.ownerId!==user)fail('unauthorized');
       const r=JSON.parse(q.text);
@@ -364,7 +393,7 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
         !Number.isFinite(r.humidity)||r.humidity<0||r.humidity>100||!Number.isFinite(r.light)||r.light<0||r.light>200000)fail('invalid_transition');
       // Phone ingestion timestamps are server-authoritative; the firmware adapter will submit per-item samples.
       const reading=ctx.db.storageReadings.insert({id:uid(ctx),ownerId:user,itemID:item.id,deviceID:item.deviceID,
-        temperature:r.temperature,humidity:r.humidity,light:r.light,recordedAt:stamp(ctx)});
+        temperature:r.temperature,humidity:r.humidity,light:r.light,recordedAt:stamp(ctx),lightUnit:r.lightUnit==='raw'?'raw':'lux'});
       const old=[...ctx.db.storageReadings.ownerId.filter(user)].sort((a,b)=>Number(b.recordedAt-a.recordedAt));
       for(const row of old.slice(500))ctx.db.storageReadings.id.delete(row.id);return reading;
     }
@@ -376,12 +405,14 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
         typeof p.pickupAddress!=='string'||!p.pickupAddress.trim()||p.pickupAddress.length>500||
         !Number.isFinite(p.latitude)||Math.abs(p.latitude)>90||!Number.isFinite(p.longitude)||Math.abs(p.longitude)>180||
         !Number.isSafeInteger(p.start)||!Number.isSafeInteger(p.end)||p.end<=p.start||p.end<=now(ctx)||p.end>now(ctx)+259200000)fail('invalid_transition');
+      const a=f.analysis?validateFood(JSON.parse(f.analysis)):null;
       const id=uid(ctx),locId=uid(ctx),mediaId=uid(ctx),area=p.pickupAddress.trim();
-      ctx.db.pickupLocations.insert({id:locId,sellerId:user,area:'Nearby pickup',latitude:Math.round(p.latitude*100)/100,
-        longitude:Math.round(p.longitude*100)/100,exactLatitude:p.latitude,exactLongitude:p.longitude,address:area,instructions:'Arrange pickup in chat'});
-      const l=ctx.db.listings.insert({id,sellerId:user,title:f.variety?f.variety+' '+f.name:f.name,description:'Identified from a photo and reviewed by the seller.',
+      ctx.db.pickupLocations.insert({id:locId,sellerId:user,area:'Pickup location',latitude:p.latitude,
+        longitude:p.longitude,exactLatitude:p.latitude,exactLongitude:p.longitude,address:area,instructions:'Arrange pickup in chat'});
+      const conditions=recordedStorage(ctx,f);
+      const l=ctx.db.listings.insert({id,sellerId:user,storageConditions:conditions?json(conditions):'',title:f.variety?f.variety+' '+f.name:f.name,description:a?.description??'Identified from a photo and reviewed by the seller.',
         category:f.category,quantity:f.quantity,price:p.price,retail:p.price,grams:0,freshness:f.condition==='Use soon'?'Use Soon':'Good',
-        opened:false,prepared:false,storage:f.storage,allergens:p.allergens.trim(),vegetarian:true,purchased:'Seller supplied',bestBy:'',status:'published',area:'Nearby pickup',
+        opened:a?.opened??false,prepared:a?.prepared??false,storage:f.storage,allergens:p.allergens.trim(),vegetarian:a?.vegetarian??true,purchased:'Seller supplied',bestBy:'',status:'published',area:'Nearby pickup',
         version:1,created:stamp(ctx),creationOrder:9007199254740991n-stamp(ctx),updated:stamp(ctx)});
       ctx.db.mediaAssets.insert({id:mediaId,ownerId:user,key:'data:image/jpeg;base64,'+f.photoBase64,hash:mediaId,mime:'image/jpeg',width:0,height:0,visibility:'public',state:'ready',created:stamp(ctx)});
       ctx.db.listingMedia.insert({id:uid(ctx),listingId:id,mediaId,role:'cover',order:0});
@@ -390,7 +421,7 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
       ctx.db.foodInventory.id.update({...f,listingID:id});indexListing(ctx,l);return {id};
     }
     case 'draft': {
-      const id=uid(ctx);ctx.db.listings.insert({id,sellerId:user,title:'',description:'',category:'Breakfast',quantity:'1 package',price:0,retail:899,grams:363,
+      const id=uid(ctx);ctx.db.listings.insert({id,sellerId:user,storageConditions:'',title:'',description:'',category:'Breakfast',quantity:'1 package',price:0,retail:899,grams:363,
         freshness:'Fresh',opened:false,prepared:false,storage:'Pantry',allergens:'Oats, almonds',vegetarian:true,purchased:'Today',bestBy:'',status:'draft',area:'Linden Park',version:1,created:stamp(ctx),creationOrder:9007199254740991n-stamp(ctx),updated:stamp(ctx)});
       return {id,version:1};
     }
@@ -432,6 +463,10 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
       ctx.db.listings.id.update({...l,status:'archived',version:l.version+1});indexListing(ctx,{...l,status:'archived'});return {};
     }
     case 'plan': {
+      const spec=q.text.startsWith('{')?JSON.parse(q.text):{mode:q.text};
+      const mode=spec.mode||'Fastest';
+      const originLat=spec.latitude??42.28,originLon=spec.longitude??-83.74;
+      if(!Number.isFinite(originLat)||Math.abs(originLat)>90||!Number.isFinite(originLon)||Math.abs(originLon)>180)fail('invalid_transition');
       if(activeRun(ctx,user))fail('invalid_transition');
       const savedItems=[...ctx.db.cartItems.buyerId.filter(user)];if(!savedItems.length)fail('invalid_transition');
       // Confirmation reserves the entire cart in this transaction; failure rolls back every claim.
@@ -439,19 +474,19 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
       const items=[...ctx.db.cartItems.buyerId.filter(user)];
       for(const i of items)checkClaim(ctx,i.reservationId);
       invalidateDraft(ctx,user);
-      const run=ctx.db.pickupRuns.insert({id:uid(ctx),buyerId:user,mode:q.text||'Fastest',status:'draft',phase:'idle',currentStop:0,version:1,created:stamp(ctx)});
+      const run=ctx.db.pickupRuns.insert({id:uid(ctx),buyerId:user,mode,status:'draft',phase:'idle',currentStop:0,version:1,created:stamp(ctx)});
       const groups=new Map<string,typeof items>();
       for(const i of items){const l=listing(ctx,i.listingId);const w=[...ctx.db.listingPickupWindows.listingId.filter(l.id)].find(w=>w.end>now(ctx));if(!w)fail('expired');
         const key=`${l.sellerId}:${w.locationId}`;groups.set(key,[...(groups.get(key)||[]),i]);}
-      let lat=42.28,lon=-83.74,proposed=now(ctx)+300000,seq=0;
+      let lat=originLat,lon=originLon,proposed=now(ctx)+300000,seq=0;
       const remaining=[...groups.values()];
       while(remaining.length){remaining.sort((a,b)=>{
         const wa=[...ctx.db.listingPickupWindows.listingId.filter(a[0].listingId)][0];const wb=[...ctx.db.listingPickupWindows.listingId.filter(b[0].listingId)][0];
         const la=ctx.db.pickupLocations.id.find(wa.locationId)!;const lb=ctx.db.pickupLocations.id.find(wb.locationId)!;
         const da=distance(lat,lon,la.latitude,la.longitude),dbb=distance(lat,lon,lb.latitude,lb.longitude);
-        const costA=q.text==='Fastest'?Math.max(da/15*3600000,Number(wa.start)-proposed):da;
-        const costB=q.text==='Fastest'?Math.max(dbb/15*3600000,Number(wb.start)-proposed):dbb;
-        return (q.text==='Best timing'?Number(wa.end-wb.end):costA-costB)||a[0].listingId.localeCompare(b[0].listingId);
+        const costA=mode==='Fastest'?Math.max(da/15*3600000,Number(wa.start)-proposed):da;
+        const costB=mode==='Fastest'?Math.max(dbb/15*3600000,Number(wb.start)-proposed):dbb;
+        return (mode==='Best timing'?Number(wa.end-wb.end):costA-costB)||a[0].listingId.localeCompare(b[0].listingId);
       });const group=remaining.shift()!;const l=listing(ctx,group[0].listingId);const windows=group.map(i=>[...ctx.db.listingPickupWindows.listingId.filter(i.listingId)][0]);
         const w=windows[0];const loc=ctx.db.pickupLocations.id.find(w.locationId)!;
         proposed=Math.max(proposed+Math.ceil(distance(lat,lon,loc.latitude,loc.longitude)/15*60)*60000,...windows.map(w=>Number(w.start)));
@@ -462,12 +497,30 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
       }
       return runProjection(ctx,user);
     }
+    case 'reorder_plan': {
+      const r=ctx.db.pickupRuns.id.find(q.resourceId);if(!r)fail('not_found');if(r.buyerId!==user)fail('unauthorized');
+      const stops=[...ctx.db.pickupStops.byRun.filter(r.id)];if(r.status!=='draft'||stops.some(s=>s.status!=='unconfirmed'))fail('invalid_transition');
+      const p=JSON.parse(q.text);if(!Array.isArray(p.order)||p.order.length!==stops.length||new Set(p.order).size!==stops.length||p.order.some((id:string)=>!stops.some(s=>s.id===id)))fail('invalid_transition');
+      let lat=p.latitude??42.28,lon=p.longitude??-83.74,proposed=now(ctx)+300000;
+      if(!Number.isFinite(lat)||Math.abs(lat)>90||!Number.isFinite(lon)||Math.abs(lon)>180)fail('invalid_transition');
+      for(let sequence=0;sequence<p.order.length;sequence++){
+        const stop=stops.find(s=>s.id===p.order[sequence])!,loc=ctx.db.pickupLocations.id.find(stop.locationId)!;
+        const windows=[...ctx.db.pickupStopItems.stopId.filter(stop.id)].map(i=>[...ctx.db.listingPickupWindows.listingId.filter(i.listingId)].find(w=>w.locationId===loc.id&&w.end>now(ctx))!);
+        if(windows.some(w=>!w))fail('expired');
+        proposed=Math.max(proposed+Math.ceil(distance(lat,lon,loc.latitude,loc.longitude)/15*60)*60000,...windows.map(w=>Number(w.start)));
+        if(proposed>Number(stop.windowEnd))fail('unavailable');
+        ctx.db.pickupStops.id.update({...stop,sequence,proposed:BigInt(Math.round(proposed))});
+        lat=loc.latitude;lon=loc.longitude;proposed+=300000;
+      }
+      ctx.db.pickupRuns.id.update({...r,version:r.version+1});return runProjection(ctx,user);
+    }
     case 'coordinate': {
       const r=ctx.db.pickupRuns.id.find(q.resourceId);if(!r)fail('not_found');if(r.buyerId!==user)fail('unauthorized');if(r.status!=='draft')fail('invalid_transition');
       for(const s of ctx.db.pickupStops.byRun.filter(r.id)){
+        if(s.status!=='unconfirmed')continue;
         for(const i of ctx.db.pickupStopItems.stopId.filter(s.id))checkClaim(ctx,i.reservationId);
         ctx.db.pickupStops.id.update({...s,status:'waiting'});const c=conversation(ctx,user,s.sellerId);
-        sendMessage(ctx,user,c.id,`Can you confirm pickup at ${new Date(Number(s.proposed)).toISOString()}?`,q.operationId);
+        sendMessage(ctx,user,c.id,`I'd like to pick up ${[...ctx.db.pickupStopItems.stopId.filter(s.id)].map(i=>listing(ctx,i.listingId).title).join(', ')}. Please confirm the pickup request in this chat.`,`${q.operationId}:${s.id}`);
       }return {};
     }
     case 'confirm': {
@@ -563,6 +616,27 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
 const reads=new Set(['bootstrap','feed','search','map','detail','history','messages','seller_activity','media','inventory']);
 export const api = db.procedure({ request: Request }, Result, (ctx, { request }) => {
   try {
+    if(request.action==='scan_analyze') {
+      const config=ctx.withTx(tx=>{
+        const user=actor(tx), key=`scan:${user}`, window=stamp(tx)/60000n;
+        const rate=tx.db.rateLimits.userId.find(key);if(rate?.window===window && rate.count>=6)fail('rate_limited');
+        const updated={userId:key,window,count:rate?.window===window?rate.count+1:1};
+        if(rate)tx.db.rateLimits.userId.update(updated);else tx.db.rateLimits.insert(updated);
+        const config=tx.db.geminiConfiguration.id.find('runtime');if(!config?.key)fail('gemini_not_configured');return config;
+      });
+      if(request.text.length>90000 || !/^[A-Za-z0-9+/=]+$/.test(request.text))fail('invalid_transition');
+      const response=ctx.http.fetch(`https://generativelanguage.googleapis.com/v1beta/models/${config.model}:generateContent`, {
+        method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':config.key},timeout:TimeDuration.fromMillis(45000),
+        body:JSON.stringify({contents:[{parts:[{text:foodPrompt},{inlineData:{mimeType:'image/jpeg',data:request.text}}]}],
+          generationConfig:{responseMimeType:'application/json',responseJsonSchema:foodSchema,maxOutputTokens:4096}})
+      });
+      if(response.status===402)fail('gemini_billing_required');
+      if(response.status===429)fail('rate_limited');if(response.status!==200)fail('gemini_unavailable');
+      const result=response.json() as any;
+      const content=result.candidates?.[0]?.content?.parts?.filter((p:any)=>p.text && !p.thought).map((p:any)=>p.text).join('');
+      const analysis=validateFood(JSON.parse(content??''));
+      return {apiVersion:1,serverTime:Number(ctx.timestamp.microsSinceUnixEpoch/1000n),error:'',payload:json(analysis)};
+    }
     return ctx.withTx(tx => {
       const user=actor(tx);let result:unknown;
       const rate=tx.db.rateLimits.userId.find(user),window=stamp(tx)/60000n;
@@ -581,7 +655,7 @@ export const api = db.procedure({ request: Request }, Result, (ctx, { request })
       }
       result=process(tx,user,request);return {apiVersion:1,serverTime:now(tx),error:'',payload:json(result)};
     });
-  } catch(error) { const text=String(error);const code=['unauthorized','not_found','unavailable','expired','stale_version','invalid_transition','service_unavailable','rate_limited'].find(c=>text.includes(c))??'service_unavailable';return {apiVersion:1,serverTime:Number(ctx.timestamp.microsSinceUnixEpoch/1000n),error:code,payload:'{}'}; }
+  } catch(error) { const text=String(error);const code=['gemini_billing_required','gemini_not_configured','gemini_unavailable','invalid_analysis','unauthorized','not_found','unavailable','expired','stale_version','invalid_transition','service_unavailable','rate_limited'].find(c=>text.includes(c))??'service_unavailable';return {apiVersion:1,serverTime:Number(ctx.timestamp.microsSinceUnixEpoch/1000n),error:code,payload:'{}'}; }
 });
 
 export const registerProfile = db.procedure({ token: t.string() }, Result, (ctx, { token }) => {
@@ -599,10 +673,11 @@ export const registerProfile = db.procedure({ token: t.string() }, Result, (ctx,
       if (existing) {
         const user = tx.db.users.id.find(existing.userId);
         if (!user || user.status !== 'active') fail('unauthorized');
+        tx.db.users.id.update({...user, name:claims.name==='Gusto member'?user.name:claims.name, avatar:claims.picture || user.avatar});
         return {apiVersion:1,serverTime:now(tx),error:'',payload:json({userId:user.id})};
       }
       const id = uid(tx);
-      tx.db.users.insert({id,name:claims.name,avatar:'',status:'active',created:stamp(tx)});
+      tx.db.users.insert({id,name:claims.name,avatar:claims.picture,status:'active',created:stamp(tx)});
       tx.db.userIdentities.insert({identity:tx.sender,userId:id});
       tx.db.userPreferences.insert({userId:id,vegetarian:false,area:'',smartAlerts:false,version:1});
       tx.db.carts.insert({userId:id,version:1,updated:stamp(tx)});
@@ -692,7 +767,7 @@ function seedCatalog(tx: Ctx, assetJSON: string, count: number, cloud: boolean) 
     const f=fixtures[i%fixtures.length],id=i<fixtures.length?f.id:`listing-${String(i).padStart(5,'0')}`;
     let sellerId=i<fixtures.length?f.sellerID:ids[i%ids.length];
     if(i>=count-3 && sellerId==='demo-buyer')sellerId='maya';
-    const row=tx.db.listings.insert({id,sellerId,title:i<fixtures.length?f.name:`${f.name} · package ${i+1}`,description:cloud?'Sample food package (fictional)':'Local demo food package',
+    const row=tx.db.listings.insert({id,sellerId,storageConditions:'',title:i<fixtures.length?f.name:`${f.name} · package ${i+1}`,description:cloud?'Sample food package (fictional)':'Local demo food package',
       category:f.category,quantity:f.quantity,price:f.price+(i<fixtures.length?0:i%5*25),retail:f.retail,grams:Math.round(f.weight*453.59237),
       freshness:f.freshness,opened:f.opened,prepared:f.prepared,storage:f.storage,allergens:f.allergens,vegetarian:f.vegetarian,
       purchased:'Today',bestBy:'',status:i===count-1?'archived':i>=count-3?'sold':'published',area:'Linden Park',version:1,created:stamp(tx)-BigInt(i*1000),creationOrder:9007199254740991n-stamp(tx)+BigInt(i*1000),updated:stamp(tx)-BigInt(i*60000)});
@@ -756,3 +831,20 @@ export const expireForTest=db.procedure({reservationId:t.string()},t.unit(),(ctx
   const r=tx.db.reservations.id.find(q.reservationId);if(!r)fail('not_found');
   if(r.status!=='held')fail('invalid_transition');tx.db.reservations.id.update({...r,expires:stamp(tx)-1n});return {};
 }));
+
+export const configureGemini=db.procedure({key:t.string(),model:t.string()},t.unit(),(ctx,q)=>ctx.withTx(tx=>{
+  owner(tx);if(q.key.length<20 || q.key.length>200 || !/^gemini-[a-z0-9.-]+$/.test(q.model))fail('invalid_transition');
+  const row={id:'runtime',key:q.key,model:q.model};if(tx.db.geminiConfiguration.id.find(row.id))tx.db.geminiConfiguration.id.update(row);else tx.db.geminiConfiguration.insert(row);return {};
+}));
+
+export const backfillStorageConditions=db.procedure(t.unit(),ctx=>ctx.withTx(tx=>{
+  owner(tx);
+  for(const f of tx.db.foodInventory.iter()) {
+    if(!f.listingID)continue;
+    const row=tx.db.listings.id.find(f.listingID);if(!row || row.storageConditions)continue;
+    const conditions=recordedStorage(tx,f);
+    if(conditions)tx.db.listings.id.update({...row,storageConditions:json(conditions)});
+  }
+  return {};
+}));
+export const rebuildSearchIndex=db.procedure(t.unit(),ctx=>ctx.withTx(tx=>{owner(tx);for(const row of [...tx.db.listings.iter()])indexListing(tx,row);return {};}));

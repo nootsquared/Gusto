@@ -1,5 +1,68 @@
 # Testing and verification
 
+October 4 final account/location/listing fixes: 49 core tests passed with one opt-in skip.
+The isolated backend integration passed exact published coordinates, real storage snapshots,
+own-listing exclusion, rejected self-purchase, and a Fresh Check message delivered to the seller
+exactly once across repeated requests. Schema republish preserved account/inventory/receipt data.
+The focused scan/save/sell Simulator test passed price entry, keyboard Done, and live address
+selection. The final signed build was installed and launched on the connected iPhone; the cloud
+module was deployed with `--delete-data=never`, and storage backfill completed.
+Logs: `/tmp/gusto-final-fixes-core.log`, `/tmp/gusto-final-fixes-backend-final.log`,
+`/tmp/gusto-final-fixes-ui.log`, `/tmp/gusto-final-fixes-phone.log`,
+`/tmp/gusto-final-fixes-cloud.log`, `/tmp/gusto-final-fixes-install.log`,
+`/tmp/gusto-final-fixes-launch.log`. Physical GPS accuracy and long-running provider token renewal
+still require normal device use; they were not simulated by changing the user's credentials.
+
+October 4 pickup-location follow-up: the focused scan/save/sell Simulator test passed live address
+typing and selecting the first MapKit match without a Find address button. The signed iPhone build
+passed. Logs: `/tmp/gusto-pickup-location-ui-final.log`, `/tmp/gusto-pickup-location-phone.log`.
+Startup now sends an expired, unrefreshable stored session to Welcome and retains the account
+for transient failures; this branch was inspected and compiled, not forced by expiring the
+user's actual credentials.
+
+## Gemini scanning and sensor history — October 4, 2026
+
+Initial verification was local. Following the user's deployment command, the shared Maincloud
+backend was updated without deleting data, Gemini configured, and search indexes rebuilt.
+The cloud retained 200 listing records. The signed Debug build was installed and launched normally
+on the connected iPhone 17 Pro. Logs: `/tmp/gusto-gemini-cloud-deploy.log`,
+`/tmp/gusto-gemini-phone-build.log`, `/tmp/gusto-gemini-phone-install.log`,
+`/tmp/gusto-gemini-phone-launch.log`. This confirms installation and launch, not a completed physical
+two-account or sensor test. The replacement Gemini key successfully analyzed a real banana
+photo, returning ripe condition and a crop box. Reusing that recorded analysis, the isolated
+two-account smoke check passed private save, owner-only tracking, raw BLE history, explicit
+publication, singular-name search, listing photo access and seller chat. No second paid analysis
+was needed for the search regression.
+
+The core suite passed 49 tests with one opt-in test skipped and no failures. Coverage includes
+quality estimates requiring matching food metadata and valid device history, warmer conditions,
+unlinking, and invalidated suggestions after edits. The final backend suite passed authentication,
+inventory ownership, marketplace/pickup transitions and persistence through non-destructive
+republishing. Simulator tests passed inline Discover search and private scan/save/sell review;
+the scan flow uses an explicitly marked fixture. The unsigned iPhone Release build passed.
+
+Logs: `/tmp/gusto-gemini-core.log`, `/tmp/gusto-gemini-backend-final.log`,
+`/tmp/gusto-gemini-live-smoke.log`, `/tmp/gusto-gemini-ui-final.log`,
+`/tmp/gusto-gemini-device.log`. Physical BLE recording, real Google avatar presentation, and
+two physical phones remain unverified. Quality estimates are provisional and uncalibrated;
+these tests do not establish a food-safety expiration model. See `GEMINI_SCAN_SETUP.md` for setup.
+
+## Cloud browsing and foreground sync
+
+The 2026-10-04 core run passes 45 tests with one live-backend opt-in skipped. Coverage includes
+later-page additions, withdrawn listings, interrupted refresh preserving the previous snapshot,
+and wider-area suggestions respecting other filters. The isolated database suite passes private
+scan ownership, publication visible to another account, and persistence after republish. Read-only
+Maincloud checks found 197 published listings; no cloud users or inventory were modified for testing.
+
+Simulator checks pass Discover empty-area controls, map results outside a narrower Discover radius,
+the location panel's single Done button, and the sensor dashboard/physical-device requirement.
+The final unsigned iPhone Release build passes with Xcode 26.3. A two-physical-phone scan/publish
+check remains: sign in normally on each phone, save a scan, explicitly publish it, then check
+Discover/Map from the second account in the same area after a refresh. Foreground polling is about
+ten seconds. Logs: `/tmp/gusto-feed-core.log`, `/tmp/gusto-sync-backend.log`,
+`/tmp/gusto-feed-ui-final.log`, `/tmp/gusto-feed-ui-latest.log`, `/tmp/gusto-feed-device-final.log`.
+
 ## Combined UI/backend merge verification — October 4, 2026
 
 The combined shared core suite ran 31 tests with 1 opt-in live test skipped and 0 failures. The app compiled with ad-hoc Simulator signing and the single fixture test `testDiscoveryScreenshotAndEmptyFilterResults` passed. Connected backend services and firmware were preserved but were not deployed or retested in this merge pass. Logs: `work/rebase-resolution-core.log`, `work/merged-ui-backend-check.log`; result: `work/MergedUIBackend-20261004.xcresult`.
@@ -192,3 +255,35 @@ Saved cloud carts are tested with two buyers adding the same listing without any
 ## Scan / inventory — October 4, 2026
 
 The core suite passes 39 tests (one opt-in test skipped), including private inventory save without publishing/reserving and item/device/time/range isolation for three-day storage summaries. The isolated backend suite passes private scan access, sensor sample validation, explicit seller attestations, publication with the scan photo, unlisting, deletion and non-destructive republish. `testScanSavesPrivateItemAndShowsSellReview` passes the camera tab, disconnected Bluetooth panel, private save and prefilled listing review; it uses an explicitly marked UI-test fixture instead of real camera capture. The iPhone Release build passes. Physical-device camera, Bluetooth pairing/firmware decoding, Gemini and calibrated expiry forecasting have not been validated. Logs: `/tmp/gusto-scan-core.log`, `/tmp/gusto-scan-backend.log`, `/tmp/gusto-scan-ui.log`, `/tmp/gusto-scan-device.log`.
+
+## Nano BLE live dashboard — October 4, 2026
+
+The core suite passed 43 tests (1 existing opt-in live-backend test skipped), including four
+climate-protocol tests covering the exact byte layout, signed Fahrenheit/Celsius conversion,
+validity masks, malformed/out-of-range packets, raw light counts, duplicate read/notify records,
+sequence/uptime wrapping, reconnect resets and the five-second stale deadline.
+
+Simulator checks `testSensorDashboardAndPhysicalDeviceRequirement` and
+`testScanSavesPrivateItemAndShowsSellReview` passed. The dashboard test checks three empty values
+before hardware is connected and the explicit physical-iPhone requirement instead of fake BLE
+readings. The final layout/state adjustment passed the dashboard check again. Unsigned Release
+builds for generic iOS passed; this verifies compilation, not development signing or installation.
+Logs: `/tmp/gusto-ble-core.log`, `/tmp/gusto-ble-ui.log`, `/tmp/gusto-ble-ui-final.log`,
+`/tmp/gusto-ble-device-final.log`.
+
+The actual Gusto-to-Nano radio path still requires a physical iPhone test using
+[IPHONE_SENSOR_SETUP.md](IPHONE_SENSOR_SETUP.md). Existing firmware/LightBlue verification
+in `Developer/BLE_PROTOCOL.md` does not substitute for testing this new app adapter.
+
+October 4 pickup/discovery fixes: 48 core tests passed (one opt-in backend test skipped),
+backend typecheck and isolated-server integration passed. The integration exercises selected-origin
+planning, stop reordering, seller confirmation, handoff, duplicate request protection and scan
+publication. Four Simulator UI checks passed for pickup flow, inline search, address selection and
+scan/sell review. The final repeated zoom/search regression passed after switching map searches to
+full canvas bounds; attribution layout margins must not narrow the searched area. Final signed
+iPhone build passed using Xcode 26.3. Logs: `/tmp/gusto-fixes-core.log`,
+`/tmp/gusto-fixes-backend.log`, `/tmp/gusto-fixes-ui.log`, `/tmp/gusto-map-final.log`,
+`/tmp/gusto-fixes-phone-build-final.log`. Cloud module publishing succeeded with
+`--delete-data=never`; a read-only post-deployment query confirmed 197 published listings.
+These tests do not verify real payment processing, a physical seller-to-buyer exchange or the
+Google provider's account photo on the user's phone.

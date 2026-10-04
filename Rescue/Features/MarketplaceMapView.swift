@@ -15,6 +15,7 @@ struct MarketplaceMapView: View {
     @State private var moved = false
     @State private var searching = false
     @State private var searchError: String?
+    @State private var viewportRevision = 0
     @State private var locationExpanded = false
     @State private var addressQuery = ""
     @State private var completedAddressQuery = ""
@@ -23,16 +24,19 @@ struct MarketplaceMapView: View {
 
     private var items: [Listing] {
         store.catalog.filter { item in
+            guard item.sellerID != store.accountID else { return false }
             var candidate = item
             // The viewport defines map distance; other marketplace filters still apply.
             candidate.distance = 0
             guard store.filters.accepts(candidate, sellers: store.sellers) else { return false }
             guard let region = searchedRegion else { return true }
             let seller = store.seller(item.sellerID)
+            let latitude = item.latitude ?? seller.latitude
+            let itemLongitude = item.longitude ?? seller.longitude
             let longitude = abs(
-                (seller.longitude - region.center.longitude + 540)
+                (itemLongitude - region.center.longitude + 540)
                     .truncatingRemainder(dividingBy: 360) - 180)
-            return abs(seller.latitude - region.center.latitude) <= region.span.latitudeDelta / 2
+            return abs(latitude - region.center.latitude) <= region.span.latitudeDelta / 2
                 && longitude <= region.span.longitudeDelta / 2
         }.sorted { $0.distance < $1.distance }
     }
@@ -43,10 +47,17 @@ struct MarketplaceMapView: View {
                 items: items, sellers: store.sellers, selectedID: $selectedID,
                 cameraRegion: cameraRegion, cameraRequest: cameraRequest,
                 showsUser: location.usingGPS, selectedLocation: location.selection,
-                reduceMotion: reduceMotion
+                reduceMotion: reduceMotion,
+                onSelect: { id in
+                    selectedID = id
+                    router.sheet = .listing(id)
+                }
             ) { region, userMoved in
                 visibleRegion = region
-                if userMoved { withAnimation(Theme.spring) { moved = true } }
+                if userMoved {
+                    viewportRevision += 1
+                    withAnimation(Theme.spring) { moved = true }
+                }
             }.ignoresSafeArea(edges: .top)
             if locationExpanded {
                 Color.clear.contentShape(Rectangle()).ignoresSafeArea()
@@ -122,8 +133,21 @@ struct MarketplaceMapView: View {
                     if items.isEmpty {
                         VStack(spacing: 5) {
                             Text("No food in this area yet").rescueFont(16, .semibold)
-                            Text("Move the map or try different filters.")
+                            Text("Try a wider area or adjust your filters.")
                                 .rescueFont(13).foregroundStyle(Theme.secondary)
+                            Button("Widen map area") {
+                                let target = MKCoordinateRegion(
+                                    center: visibleRegion.center,
+                                    span: MKCoordinateSpan(
+                                        latitudeDelta: min(
+                                            180, visibleRegion.span.latitudeDelta * 2),
+                                        longitudeDelta: min(
+                                            360, visibleRegion.span.longitudeDelta * 2)))
+                                cameraRegion = target
+                                cameraRequest = UUID()
+                                Task { await searchArea(region: target) }
+                            }.rescueFont(14, .semibold).foregroundStyle(Theme.save)
+                                .padding(.top, 8).accessibilityIdentifier("expand-map-area")
                         }.frame(maxWidth: .infinity).padding(20).card(radius: 24)
                     } else {
                         HStack {
@@ -148,13 +172,13 @@ struct MarketplaceMapView: View {
                 } else {
                     Spacer(minLength: 0)
                 }
-            }.padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 16)
+            }.padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 38)
         }.toolbar(.hidden, for: .navigationBar).foregroundStyle(Theme.ink)
             .task {
                 if store.online { await searchArea() }
             }
             .onChange(of: store.online) { _, online in
-                if online { Task { await searchArea(region: searchedRegion ?? visibleRegion) } }
+                if online && !searching { Task { await searchArea(region: searchedRegion ?? visibleRegion) } }
             }
             .task(id: "\(locationExpanded)-\(addressQuery)") {
                 guard locationExpanded else { return }
@@ -282,7 +306,8 @@ struct MarketplaceMapView: View {
         cameraRegion = MKCoordinateRegion(
             center: CLLocationCoordinate2D(
                 latitude: selection.latitude, longitude: selection.longitude),
-            latitudinalMeters: 3000, longitudinalMeters: 3000)
+            latitudinalMeters: max(3000, store.filters.distance * 3218.688),
+            longitudinalMeters: max(3000, store.filters.distance * 3218.688))
         cameraRequest = UUID()
         searchedRegion = cameraRegion
         moved = false
@@ -292,6 +317,7 @@ struct MarketplaceMapView: View {
     private func searchArea(region: MKCoordinateRegion? = nil) async {
         let target = region ?? visibleRegion
         let request = UUID()
+        let revision = viewportRevision
         searchRequest = request
         searching = true
         searchError = nil
@@ -310,7 +336,7 @@ struct MarketplaceMapView: View {
             guard searchRequest == request else { return }
             withAnimation(Theme.spring) {
                 searchedRegion = target
-                moved = false
+                moved = viewportRevision != revision
             }
         } catch {
             guard searchRequest == request else { return }
@@ -363,7 +389,8 @@ private final class SellerMapAnnotation: NSObject, MKAnnotation {
     init(seller: Seller, listings: [Listing]) {
         sellerID = seller.id
         self.listings = listings.sorted { $0.price < $1.price }
-        coordinate = CLLocationCoordinate2D(latitude: seller.latitude, longitude: seller.longitude)
+        coordinate = CLLocationCoordinate2D(latitude: listings[0].latitude ?? seller.latitude,
+            longitude: listings[0].longitude ?? seller.longitude)
     }
 }
 
@@ -381,10 +408,10 @@ private final class BrowseMapAnnotation: NSObject, MKAnnotation {
 private final class MarketplaceMapCanvas: MKMapView {
     override func layoutSubviews() {
         super.layoutSubviews()
-        // Position native attribution alongside the count, above the listing carousel.
+        // Reserve the bottom edge for Apple's attribution, below the listing carousel.
         let margins = UIEdgeInsets(
-            top: 130, left: max(16, bounds.width - 160),
-            bottom: 161, right: 16)
+            top: 12, left: 16,
+            bottom: 8, right: 12)
         if layoutMargins != margins { layoutMargins = margins }
     }
 }
@@ -398,6 +425,7 @@ private struct MarketplaceBasemap: UIViewRepresentable {
     let showsUser: Bool
     let selectedLocation: BrowseLocation?
     let reduceMotion: Bool
+    let onSelect: (String) -> Void
     let regionChanged: (MKCoordinateRegion, Bool) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -425,7 +453,7 @@ private struct MarketplaceBasemap: UIViewRepresentable {
             map.setRegion(cameraRegion, animated: !reduceMotion)
         }
         let signature =
-            items.map { "\($0.id):\($0.price):\($0.sellerID)" }.joined(separator: "|")
+            items.map { "\($0.id):\($0.price):\($0.sellerID):\($0.latitude ?? 0):\($0.longitude ?? 0)" }.joined(separator: "|")
             + sellers.map { "\($0.id):\($0.latitude):\($0.longitude)" }.joined(separator: "|")
         if signature != coordinator.signature {
             coordinator.signature = signature
@@ -433,10 +461,12 @@ private struct MarketplaceBasemap: UIViewRepresentable {
                 map.annotations.filter {
                     $0 is SellerMapAnnotation || $0 is MKClusterAnnotation
                 })
-            let groups = Dictionary(grouping: items, by: \.sellerID)
+            let groups = Dictionary(grouping: items) { item in
+                "\(item.sellerID):\(item.windows?.first?.locationID ?? item.sellerID)"
+            }
             map.addAnnotations(
-                sellers.compactMap { seller in
-                    guard let listings = groups[seller.id], !listings.isEmpty else { return nil }
+                groups.values.compactMap { listings in
+                    guard let first = listings.first, let seller = sellers.first(where: { $0.id == first.sellerID }) else { return nil }
                     return SellerMapAnnotation(seller: seller, listings: listings)
                 })
         }
@@ -451,17 +481,7 @@ private struct MarketplaceBasemap: UIViewRepresentable {
                 coordinator.style(view, annotation: annotation)
             }
         }
-        if coordinator.selectedID != selectedID {
-            let hadSelection = coordinator.selectedID != nil
-            coordinator.selectedID = selectedID
-            if let pin = map.annotations.compactMap({ $0 as? SellerMapAnnotation }).first(where: {
-                $0.listings.contains { $0.id == selectedID }
-            }) {
-                if hadSelection && !cameraChanged {
-                    map.setCenter(pin.coordinate, animated: !reduceMotion)
-                }
-            }
-        }
+        coordinator.selectedID = selectedID
     }
     @MainActor final class Coordinator: NSObject, MKMapViewDelegate {
         var parent: MarketplaceBasemap
@@ -489,7 +509,8 @@ private struct MarketplaceBasemap: UIViewRepresentable {
             if isInteracting(mapView) { userMoved = true }
         }
         func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
-            let region = mapView.region
+            // Layout margins move MapKit's camera region; search the entire visible canvas.
+            let region = mapView.convert(mapView.bounds, toRegionFrom: mapView)
             let moved = userMoved
             DispatchQueue.main.async { self.parent.regionChanged(region, moved) }
         }
@@ -579,11 +600,10 @@ private struct MarketplaceBasemap: UIViewRepresentable {
                 userMoved = true
                 mapView.deselectAnnotation(cluster, animated: false)
             } else if let seller = view.annotation as? SellerMapAnnotation {
-                guard !seller.listings.contains(where: { $0.id == parent.selectedID }) else {
-                    return
-                }
+                let item = seller.listings.first { $0.id == parent.selectedID } ?? seller.listings[0]
                 DispatchQueue.main.async {
-                    withAnimation(Theme.spring) { self.parent.selectedID = seller.listings[0].id }
+                    withAnimation(Theme.spring) { self.parent.onSelect(item.id) }
+                    mapView.deselectAnnotation(seller, animated: false)
                     Haptic.tap()
                 }
             }

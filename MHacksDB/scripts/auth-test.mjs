@@ -8,7 +8,9 @@ const { registeredClaims, authIssuer, authClient, authProject } = await import(
 const claims = { iss: authIssuer, aud: authClient, project_id: authProject, sub: 'user', exp: 2000, name: 'Test User' };
 const token = value => `header.${Buffer.from(JSON.stringify(value)).toString('base64url')}.signature`;
 assert.equal(registeredClaims(token(claims), 1000).name, 'Test User');
-assert.equal(registeredClaims(token({ ...claims, aud: [authClient], name: '' }), 1000).name, 'Rescue member');
+assert.equal(registeredClaims(token({ ...claims, aud: [authClient], name: '' }), 1000).name, 'Gusto member');
+assert.equal(registeredClaims(token({ ...claims, picture: 'https://lh3.googleusercontent.com/avatar' }), 1000).picture, 'https://lh3.googleusercontent.com/avatar');
+assert.equal(registeredClaims(token({ ...claims, picture: 'javascript:alert(1)' }), 1000).picture, '');
 for (const changed of [{ iss: 'https://other.example' }, { aud: 'other-client' },
   { project_id: 'other-project' }, { exp: 999 }, { sub: '' }, { aud: [authClient, 'other-client'] }]) {
   assert.throws(() => registeredClaims(token({ ...claims, ...changed }), 1000));

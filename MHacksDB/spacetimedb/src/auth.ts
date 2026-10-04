@@ -22,5 +22,6 @@ export function registeredClaims(token: string, epochSeconds: number) {
       typeof claims.sub !== 'string' || !claims.sub ||
       typeof claims.exp !== 'number' || claims.exp <= epochSeconds) throw Error('unauthorized');
   const name = typeof claims.name === 'string' ? claims.name.trim().slice(0, 100) : '';
-  return { name: name || 'Rescue member' };
+  const picture = typeof claims.picture === 'string' && /^https:\/\/[^\s]+$/.test(claims.picture) && claims.picture.length <= 2000 ? claims.picture : '';
+  return { name: name || 'Gusto member', picture };
 }

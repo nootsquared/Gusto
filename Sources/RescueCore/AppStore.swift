@@ -13,6 +13,8 @@ import Observation
     public private(set) var storageReadings: [StorageReading] = []
     public private(set) var inventoryLoading = false
     public private(set) var profileName = "Priya S."
+    public private(set) var profileAvatar: String?
+    public private(set) var pickupRequests: [SellerPickupRequest] = []
     public private(set) var ownListings: [Listing] = []
     public private(set) var sales: [Receipt] = []
     public private(set) var morePurchases = false
@@ -34,7 +36,7 @@ import Observation
     @ObservationIgnored private var lastRefresh = Date.distantPast
     @ObservationIgnored private var lastFeedRefresh = Date.distantPast
     @ObservationIgnored private var serverOffset: Double = 0
-    @ObservationIgnored private var feedLoading = false
+    public private(set) var feedLoading = false
     @ObservationIgnored private var messageSequences: [String: Int] = [:]
     public private(set) var cart: [String] = []
     public var filters = Filters()
@@ -76,6 +78,7 @@ import Observation
         guard let plan, plan.stops.indices.contains(stopIndex) else { return nil }
         return plan.stops[stopIndex]
     }
+    public var earnings: Int { monthly.reduce(0) { $0 + $1.earnings } }
     public var impact: Totals {
         if !isBackend { return Totals(receipts.flatMap(\.items)) }
         let rows = monthly.filter { $0.mode == "demo" }
@@ -131,15 +134,53 @@ import Observation
     public func confirmCartAndPlan() async -> Bool {
         guard !runActive, !cart.isEmpty else { return false }
         if isBackend {
-            let confirmed = await backendWrite("plan", text: RouteMode.fastest.rawValue)
+            let confirmed = await backendWrite("plan", text: pickupPlanSpec())
             return confirmed && plan != nil
         }
         makePlan()
         return plan != nil
     }
+    private func pickupPlanSpec(order: [String]? = nil) -> String {
+        var values: [String: Any] = ["mode": "Fastest"]
+        if let origin = browseOrigin {
+            values["latitude"] = origin.latitude
+            values["longitude"] = origin.longitude
+        }
+        if let order { values["order"] = order }
+        return (try? JSONSerialization.data(withJSONObject: values)).map {
+            String(decoding: $0, as: UTF8.self)
+        } ?? "{}"
+    }
+    public func movePickupStop(_ id: String, by offset: Int) async {
+        guard let current = plan, current.stops.allSatisfy({ $0.status == .unconfirmed }),
+            let index = current.stops.firstIndex(where: { $0.id == id }),
+            current.stops.indices.contains(index + offset), !backendBusy else { return }
+        var stops = current.stops
+        stops.swapAt(index, index + offset)
+        if isBackend, let runID = current.serverID {
+            await backendWrite("reorder_plan", id: runID, text: pickupPlanSpec(order: stops.map(\.id)))
+        } else {
+            let times = current.stops.map(\.minute)
+            for i in stops.indices { stops[i].minute = times[i] }
+            plan?.stops = stops
+        }
+    }
+    public func confirmSellerPickup(_ id: String) async {
+        await backendWrite("confirm", id: id)
+    }
+    public func completeSellerHandoff(_ id: String) async {
+        await backendWrite("handoff", id: id)
+    }
+    public func beginPickups() async -> Bool {
+        if isBackend {
+            guard let id = plan?.serverID, plan?.allConfirmed == true else { return false }
+            return await backendWrite("start", id: id) && phase == .enroute
+        }
+        return startRun()
+    }
     public func makePlan(mode: RouteMode = .fastest) {
         if isBackend {
-            launchWrite("plan", text: mode.rawValue)
+            launchWrite("plan", text: pickupPlanSpec())
             return
         }
         guard !runActive else { return }
@@ -150,7 +191,11 @@ import Observation
     }
     public func coordinate() async {
         if isBackend {
-            if let id = plan?.serverID { await backendWrite("coordinate", id: id) }
+            guard !coordinating, let id = plan?.serverID,
+                plan?.stops.contains(where: { $0.status == .unconfirmed }) == true else { return }
+            coordinating = true
+            defer { coordinating = false }
+            await backendWrite("coordinate", id: id)
             return
         }
         guard !coordinating, !runActive, let existing = plan, !existing.stops.isEmpty,
@@ -326,8 +371,9 @@ import Observation
     }
     public func freshCheck(_ id: String) async {
         if isBackend {
-            await backendWrite("freshness", id: id)
-            notice = "Fresh Check requested · waiting for seller"
+            if await backendWrite("freshness", id: id) {
+                notice = "Fresh Check requested · message sent to seller"
+            }
             return
         }
         guard !checkingIDs.contains(id), let item = listing(id), item.available else { return }
@@ -363,11 +409,32 @@ import Observation
         guard generation == sessionGeneration else { return }
         messages[sellerID, default: []].append(ChatMessage(service.reply(to: trimmed)))
     }
+    /// The seeded catalog contains numbered copies of the same bundled products.
+    /// Choose the closest sample offer per photo; never collapse genuine user listings.
+    public func distinctSampleListings(_ items: [Listing]) -> [Listing] {
+        let samplePhotos = Set(MockCatalog.listings.map(\.id))
+        var best: [String: Listing] = [:]
+        var keys: [String] = []
+        for item in items {
+            let sample = item.id.hasPrefix("listing-") || samplePhotos.contains(item.id)
+            let key = sample && samplePhotos.contains(item.image) ? "sample:\(item.image)" : item.id
+            if best[key] == nil { keys.append(key) }
+            if let previous = best[key],
+                previous.distance < item.distance
+                    || (previous.distance == item.distance && previous.price <= item.price) { continue }
+            var display = item
+            if sample {
+                display.name = item.name.replacingOccurrences(of: #" · package \d+$"#, with: "", options: .regularExpression)
+            }
+            best[key] = display
+        }
+        return keys.compactMap { best[$0] }
+    }
     public func visibleListings(query text: String? = nil) -> [Listing] {
         if isBackend, let text, !text.isEmpty {
-            return searchResults.filter { filters.accepts($0, sellers: sellers) }
+            return searchResults.filter { $0.sellerID != accountID && filters.accepts($0, sellers: sellers) }
         }
-        var results = catalog.filter { filters.accepts($0, sellers: sellers) }
+        var results = catalog.filter { $0.sellerID != accountID && filters.accepts($0, sellers: sellers) }
         let q = (text ?? query).lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         if q.isEmpty { return results }
         var recognized = false
@@ -492,6 +559,8 @@ extension AppStore {
         inventoryLoading = false
         accountID = newRepository.accountID
         profileName = "Loading account…"
+        profileAvatar = nil
+        pickupRequests = []
         catalog = []
         sellers = []
         cart = []
@@ -541,7 +610,9 @@ extension AppStore {
         }
         guard generation == sessionGeneration else { return }
         await refreshBackend(force: true)
+        // Maintain the canonical first-page cache used by account-scoped offline launch.
         await loadNextPage(first: true)
+        await refreshMarketplace()
     }
     public func disconnectBackend() {
         sessionGeneration = UUID()
@@ -585,6 +656,8 @@ extension AppStore {
         searchGeneration = UUID()
         lastRefresh = .distantPast
         profileName = "Sign in to Gusto"
+        profileAvatar = nil
+        pickupRequests = []
     }
     public func enterBackendMode() {
         // First launch without a provisioned session must never display fixture product data.
@@ -596,6 +669,18 @@ extension AppStore {
         receipts = []
         profileName = "Connect local demo"
         online = false
+    }
+    /// Offer a wider local area only when it can reveal food matching the other filters.
+    public var suggestedBrowseRadius: Double? {
+        guard visibleListings(query: "").isEmpty else { return nil }
+        for radius in [1.5, 3.0] where radius > filters.distance {
+            var expanded = filters
+            expanded.distance = radius
+            if catalog.contains(where: { expanded.accepts($0, sellers: sellers) }) {
+                return radius
+            }
+        }
+        return nil
     }
     public func updateBrowseLocation(latitude: Double, longitude: Double) {
         guard latitude.isFinite, longitude.isFinite,
@@ -610,11 +695,13 @@ extension AppStore {
             guard let seller = sellers.first(where: { $0.id == item.sellerID }) else { return item }
             var result = item
             let rad = Double.pi / 180
-            let dLat = (seller.latitude - origin.latitude) * rad
-            let dLon = (seller.longitude - origin.longitude) * rad
+            let latitude = item.latitude ?? seller.latitude
+            let longitude = item.longitude ?? seller.longitude
+            let dLat = (latitude - origin.latitude) * rad
+            let dLon = (longitude - origin.longitude) * rad
             let a =
                 pow(sin(dLat / 2), 2)
-                + cos(origin.latitude * rad) * cos(seller.latitude * rad) * pow(sin(dLon / 2), 2)
+                + cos(origin.latitude * rad) * cos(latitude * rad) * pow(sin(dLon / 2), 2)
             result.distance = 3958.7613 * 2 * asin(sqrt(min(1, max(0, a))))
             return result
         }
@@ -642,6 +729,8 @@ extension AppStore {
     }
     private func apply(_ snapshot: BackendBootstrap) {
         profileName = snapshot.user.name
+        profileAvatar = snapshot.user.avatar
+        pickupRequests = snapshot.pickupRequests ?? []
         preferences = snapshot.preferences
         cart = snapshot.cart
         savedIDs = Set(snapshot.favorites)
@@ -710,6 +799,7 @@ extension AppStore {
             serverOffset = response.serverTime - Date().timeIntervalSince1970 * 1000
             apply(snapshot)
             online = true
+            if notice?.hasPrefix("Offline ·") == true { notice = nil }
             lastRefresh = Date()
             await restorePendingMessages()
         } catch {
@@ -720,9 +810,66 @@ extension AppStore {
             online = false
             notice =
                 catalog.isEmpty
-                ? "Offline · connect the local services to load food"
+                ? "Offline · check your connection to load food"
                 : "Offline · showing cached food"
             for i in plan?.stops.indices ?? 0..<0 { plan?.stops[i].privateLocation = nil }
+        }
+    }
+    /// Commit a complete snapshot so later pages, deletions and another seller's new posts appear.
+    public func refreshMarketplace() async {
+        guard let repository, !feedLoading else { return }
+        let generation = sessionGeneration
+        feedLoading = true
+        defer { if generation == sessionGeneration { feedLoading = false } }
+        var request = APIRequest("feed", text: "{}")
+        if let origin = browseOrigin {
+            guard let spec = try? JSONSerialization.data(withJSONObject: [
+                "latitude": origin.latitude, "longitude": origin.longitude, "distance": 100,
+            ], options: .sortedKeys) else { return }
+            request.text = String(decoding: spec, as: UTF8.self)
+        }
+        request.value = 50
+        var listings: [Listing] = []
+        var pageSellers: [Seller] = []
+        var cursors: Set<String> = []
+        do {
+            repeat {
+                try Task.checkCancellation()
+                let response = try await repository.request(request)
+                guard generation == sessionGeneration else { return }
+                let page = try JSONDecoder().decode(BackendPage.self, from: response.payload)
+                listings += page.listings
+                pageSellers += page.sellers
+                request.cursor = page.cursor
+                if !page.cursor.isEmpty && !cursors.insert(page.cursor).inserted {
+                    throw RepositoryError.invalidResponse
+                }
+            } while !request.cursor.isEmpty
+            // Keep cart/detail context, but an absent listing must stop appearing as purchasable.
+            let publishedIDs = Set(listings.map(\.id))
+            let ownIDs = Set(ownListings.map(\.id))
+            let retained = catalog.filter {
+                !publishedIDs.contains($0.id)
+                    && (cart.contains($0.id) || ownIDs.contains($0.id))
+            }.map { item in
+                var unavailable = item
+                unavailable.available = false
+                return unavailable
+            }
+            catalog = retained
+            merge(listings)
+            mergeSellers(pageSellers)
+            feedCursor = ""
+            online = true
+            lastFeedRefresh = Date()
+            if notice == "Couldn't refresh food. Pull down to try again." { notice = nil }
+        } catch is CancellationError {
+            return
+        } catch {
+            if generation == sessionGeneration {
+                online = false
+                notice = "Couldn't refresh food. Pull down to try again."
+            }
         }
     }
     public func loadNextPage(first: Bool = false) async {
@@ -846,6 +993,7 @@ extension AppStore {
             if generation == sessionGeneration {
                 merge([detail.listing])
                 mergeSellers([detail.seller])
+                recalculateBrowseDistances()
             }
         } catch {}
     }
@@ -1058,18 +1206,20 @@ extension AppStore {
     public func pollBackend() async {
         guard isBackend else { return }
         var failures = 0
-        while !Task.isCancelled {
+        let generation = sessionGeneration
+        while !Task.isCancelled && generation == sessionGeneration {
             let wait: Double =
                 online
-                ? (activeChat == nil ? (runActive || plan != nil ? 3 : 30) : 5)
+                ? (activeChat == nil ? (runActive || plan != nil ? 3 : 10) : 5)
                 : min(60, pow(2, Double(min(failures + 1, 6))))
             do {
                 try await Task.sleep(
                     nanoseconds: UInt64((wait + Double.random(in: 0...0.25)) * 1_000_000_000))
             } catch { return }
-            await refreshBackend(force: runActive || plan != nil || !online)
-            if online && Date().timeIntervalSince(lastFeedRefresh) > 60 {
-                await loadNextPage(first: true)
+            await refreshBackend(force: runActive || plan != nil || activeChat != nil || !online)
+            guard generation == sessionGeneration else { return }
+            if online && Date().timeIntervalSince(lastFeedRefresh) >= 10 {
+                await refreshMarketplace()
             }
             if let activeChat { await loadMessages(activeChat) }
             failures = online ? 0 : failures + 1
@@ -1085,7 +1235,8 @@ extension AppStore {
         let followed = Set(follows.filter { $0.kind == "category" }.map(\.target))
         let purchased = Set(receipts.flatMap { $0.items.map(\.category) })
         let eligible = catalog.filter {
-            $0.available && (!(preferences?.vegetarian ?? false) || $0.vegetarian)
+            filters.accepts($0, sellers: sellers)
+                && (!(preferences?.vegetarian ?? false) || $0.vegetarian)
         }
         return Array(
             eligible.sorted { a, b in
@@ -1154,6 +1305,36 @@ extension AppStore {
             inventory = snapshot.items
             storageReadings = snapshot.readings
         } catch { if generation == sessionGeneration { notice = error.localizedDescription } }
+    }
+    public func analyzeFoodPhoto(_ photo: String) async throws -> FoodAnalysis {
+        guard let repository else { throw RepositoryError.server("unauthorized") }
+        let generation = sessionGeneration
+        let response = try await repository.request(APIRequest("scan_analyze", text: photo))
+        guard generation == sessionGeneration else { throw CancellationError() }
+        return try JSONDecoder().decode(FoodAnalysis.self, from: response.payload)
+    }
+    public func trackInventoryFood(_ id: String, deviceID: String) async {
+        if !isBackend {
+            if let index = inventory.firstIndex(where: { $0.id == id }) { inventory[index].deviceID = deviceID }
+            return
+        }
+        if await backendWrite("inventory_track", id: id, text: deviceID) { await loadInventory() }
+    }
+    public func ingestStorageSample(deviceID: String, temperature: Double, humidity: Double, light: Double) async {
+        guard let repository, temperature.isFinite, humidity.isFinite, light.isFinite else { return }
+        let generation = sessionGeneration
+        for item in inventory where item.deviceID == deviceID {
+            guard generation == sessionGeneration else { return }
+            do {
+                let data = try JSONSerialization.data(withJSONObject: ["deviceID": deviceID, "temperature": temperature, "humidity": humidity, "light": light, "lightUnit": "raw"])
+                _ = try await repository.request(APIRequest("sensor_reading", resourceID: item.id, text: String(decoding: data, as: UTF8.self), write: true))
+            } catch {
+                // A stale measurement must not be replayed later with a new server timestamp.
+                if generation == sessionGeneration { notice = "Sensor history couldn't sync. Live readings are still on this phone." }
+                return
+            }
+        }
+        if generation == sessionGeneration { await loadInventory() }
     }
     public func saveInventoryFood(_ item: InventoryFood) async -> Bool {
         guard !item.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -1252,6 +1433,7 @@ extension AppStore {
             guard generation == sessionGeneration else { return false }
             await loadInventory()
             await refreshBackend(force: true)
+            await refreshMarketplace()
             return true
         } catch {
             if generation == sessionGeneration { notice = error.localizedDescription }
