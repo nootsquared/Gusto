@@ -55,11 +55,6 @@ struct RescueMap: View {
                             Annotation(item.name, coordinate: coordinate(item), anchor: .bottom) {
                                 pricePin(item)
                             }
-                            if selectedID == item.id {
-                                MapCircle(center: coordinate(item), radius: 120).foregroundStyle(
-                                    Theme.sage.opacity(0.15)
-                                ).stroke(Theme.sage.opacity(0.35), lineWidth: 1)
-                            }
                         }
                     } else {
                         MapPolyline(
@@ -112,11 +107,6 @@ struct RescueMap: View {
                         } else {
                             ForEach(items) { item in
                                 let point = projected(coordinate(item), size: geometry.size)
-                                if selectedID == item.id {
-                                    Circle().fill(Theme.sage.opacity(0.15)).overlay(
-                                        Circle().stroke(Theme.sage.opacity(0.3))
-                                    ).frame(width: 100, height: 100).position(point)
-                                }
                                 pricePin(item).position(point).zIndex(selectedID == item.id ? 2 : 1)
                             }
                         }
@@ -143,18 +133,19 @@ struct RescueMap: View {
             withAnimation(Theme.spring) { selectedID = item.id }
             Haptic.tap()
         } label: {
-            HStack(spacing: 5) {
-                if selected {
-                    FoodPhoto(name: item.image).frame(width: 30, height: 30).clipShape(Circle())
-                }
-                Text(Money.text(item.price)).rescueFont(13, .semibold).monospacedDigit()
-            }.padding(selected ? 4 : 8).padding(.trailing, selected ? 6 : 0).foregroundStyle(
-                selected ? Theme.paper : Theme.ink
-            )
-            .background(selected ? Theme.ink : Theme.paper, in: Capsule()).shadow(
-                color: Theme.ink.opacity(0.16), radius: 6, y: 4
-            ).frame(minHeight: 44)
+            Text(Money.text(item.price)).rescueFont(13, .semibold).monospacedDigit()
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .foregroundStyle(selected ? Theme.paper : Theme.ink)
+                .background(selected ? Theme.deep : Theme.paper, in: Capsule())
+                .overlay(
+                    Capsule().stroke(
+                        selected ? Theme.paper : Theme.line,
+                        lineWidth: selected ? 2 : 1)
+                )
+                .shadow(color: Theme.ink.opacity(0.12), radius: 3, y: 2)
+                .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityLabel("\(item.name), \(Money.text(item.price))")
+            .accessibilityAddTraits(selected ? .isSelected : [])
     }
     private func stopPin(_ stop: PickupStop, index: Int) -> some View {
         VStack(spacing: 3) {

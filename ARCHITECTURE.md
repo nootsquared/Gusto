@@ -14,6 +14,8 @@ Views compose reusable components from `Rescue/Components` and `Theme`. Colors a
 
 `Theme.configureTabBar` supplies the opaque Paper system bar and Apricot unread badge at launch; both standard and scroll-edge appearances match. `BottomAction` extends its background through the home-indicator safe area. Map listing positions preserve the Make export's x/y values, projected into a fixed fictional MapKit region; route stops use the mock sellers' coordinates.
 
+Filters are owned solely by `AppStore.filters`; the former `selectedPill` shortcut layer has been removed. Nearby is the default 0.8mi distance, and price/freshness/time/preferences use their existing model fields. Changing distance can expand results beyond the initial radius without a hidden shortcut cap.
+
 ## Product invariants
 
 - A cart contains unique listing IDs; each listing represents one rescue package, not a quantity basket.

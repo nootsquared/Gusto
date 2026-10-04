@@ -32,6 +32,7 @@ struct Avatar: View {
 struct FreshnessBadge: View {
     let freshness: Freshness
     var solid = false
+    var showDot = true
     private var background: Color {
         solid
             ? Theme.paper.opacity(0.95)
@@ -47,9 +48,12 @@ struct FreshnessBadge: View {
     }
     var body: some View {
         HStack(spacing: 4) {
-            Circle().fill(
-                freshness == .fresh ? Theme.sage : freshness == .good ? Theme.butter : Theme.coral
-            ).frame(width: 6, height: 6)
+            if showDot {
+                Circle().fill(
+                    freshness == .fresh
+                        ? Theme.sage : freshness == .good ? Theme.butter : Theme.coral
+                ).frame(width: 6, height: 6)
+            }
             Text(freshness.rawValue)
         }.rescueFont(12, .semibold).foregroundStyle(foreground).padding(.horizontal, 8).padding(
             .vertical, 4
@@ -155,7 +159,7 @@ struct AddButton: View {
 struct ListingTile: View {
     @Environment(AppRouter.self) private var router
     let item: Listing
-    var width: CGFloat = 144
+    var width: CGFloat = 164
     var badge: String? = nil
     var urgency = false
     var body: some View {
@@ -177,14 +181,15 @@ struct ListingTile: View {
                         ).padding(8)
                     }
                 }
-            Text(item.name).rescueFont(14, .semibold).lineLimit(1)
+            Text(item.name).rescueFont(15, .semibold).lineLimit(1)
             HStack(spacing: 5) {
-                Text(Money.text(item.price)).rescueFont(16, .semibold)
-                Text("\(item.discount)% off").rescueFont(12, .medium).foregroundStyle(Theme.save)
+                Text(Money.text(item.price)).rescueFont(17, .bold)
+                Text("\(item.discount)% off").rescueFont(13, .semibold).foregroundStyle(Theme.save)
                 Spacer(minLength: 0)
-                Text("\(item.distance, specifier: "%.1f") mi").rescueFont(12).foregroundStyle(
-                    Theme.muted)
-            }.monospacedDigit().minimumScaleFactor(0.75)
+                Text("\(item.distance, specifier: "%.1f") mi").rescueFont(13, .medium)
+                    .foregroundStyle(
+                        Theme.secondary)
+            }.monospacedDigit().lineLimit(1).minimumScaleFactor(0.9)
         }.frame(width: width)
     }
 }

@@ -22,13 +22,10 @@ struct CartButton: View {
 struct DiscoverView: View {
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
-    private let pills = [
-        "Near Me", "Under $5", "Use Soon", "Available Now", "Unopened", "Vegetarian",
-    ]
     private var feed: [Listing] { store.visibleListings(query: "") }
     private var picked: [Listing] {
         let order = ["straw", "avo", "gran", "yog", "eggs"]
-        return order.compactMap(store.listing).filter(store.filters.accepts)
+        return order.compactMap { id in feed.first { $0.id == id } }
     }
     var body: some View {
         ScrollView {
@@ -65,49 +62,54 @@ struct DiscoverView: View {
                         .buttonStyle(.plain).accessibilityLabel("Filters")
                     }
                 }.padding(.horizontal, 20).padding(.top, 12)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(pills, id: \.self) { pill in
-                            Chip(title: pill, selected: store.selectedPill == pill) {
-                                store.selectedPill = pill
-                            }
-                        }
-                    }.padding(.horizontal, 20)
-                }.padding(.top, 16)
                 FeedSection(
                     title: "Picked for you", subtitle: "Based on what you rescue", items: picked
                 ) { rail(picked) }
                 FeedSection(
                     title: "Buy again",
-                    items: ["straw", "bana", "yog", "gran"].compactMap(store.listing)
+                    items: ["straw", "bana", "yog", "gran"].compactMap { id in
+                        feed.first { $0.id == id }
+                    }
                 ) {
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
+                        HStack(spacing: 16) {
                             ForEach(
-                                ["straw", "bana", "yog", "gran"].compactMap(store.listing).filter(
+                                ["straw", "bana", "yog", "gran"].compactMap { id in
+                                    feed.first { $0.id == id }
+                                }.filter(
                                     store.filters.accepts)
                             ) { item in
                                 Button {
                                     if store.reserve(item.id) { Haptic.success() }
                                 } label: {
-                                    HStack(spacing: 8) {
-                                        FoodPhoto(name: item.image).frame(width: 36, height: 36)
-                                            .clipShape(Circle())
-                                        VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 12) {
+                                        FoodPhoto(name: item.image).frame(width: 64, height: 64)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        VStack(alignment: .leading, spacing: 6) {
                                             Text(
                                                 item.name.replacingOccurrences(
                                                     of: "Organic ", with: ""
                                                 ).replacingOccurrences(of: "Unopened ", with: "")
                                                     .replacingOccurrences(of: "Ripe ", with: "")
-                                            ).rescueFont(13, .semibold)
-                                            Text(
-                                                store.cart.contains(item.id)
-                                                    ? "Added ✓"
-                                                    : "\(Money.text(item.price)) · \(String(format: "%.1f", item.distance)) mi"
-                                            ).rescueFont(12).foregroundStyle(Theme.secondary)
+                                            ).rescueFont(16, .semibold).lineLimit(1)
+                                            if store.cart.contains(item.id) {
+                                                Label("Reserved", systemImage: "checkmark")
+                                                    .rescueFont(14, .medium).foregroundStyle(
+                                                        Theme.save)
+                                            } else {
+                                                HStack(spacing: 8) {
+                                                    Text(Money.text(item.price)).rescueFont(
+                                                        15, .bold
+                                                    )
+                                                    .foregroundStyle(Theme.ink)
+                                                    Text("\(item.distance, specifier: "%.1f") mi")
+                                                        .rescueFont(13, .medium)
+                                                        .foregroundStyle(Theme.secondary)
+                                                }.lineLimit(1).monospacedDigit()
+                                            }
                                         }
-                                    }.padding(4).padding(.trailing, 10).card(
-                                        radius: 30,
+                                    }.frame(width: 228, alignment: .leading).padding(10).card(
+                                        radius: 16,
                                         color: store.cart.contains(item.id)
                                             ? Theme.soft : Theme.paper)
                                 }.buttonStyle(.plain).disabled(
@@ -121,7 +123,7 @@ struct DiscoverView: View {
                     title: "Just listed near you", items: feed.sorted { $0.distance < $1.distance }
                 ) {
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(alignment: .top, spacing: 16) {
+                        HStack(alignment: .top, spacing: 24) {
                             let nearby = Array(
                                 feed.filter { $0.distance <= 0.7 }.sorted {
                                     $0.distance < $1.distance
@@ -145,7 +147,7 @@ struct DiscoverView: View {
                     title: "Dinner tonight", items: feed.filter { $0.category == "Prepared" }
                 ) {
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
+                        HStack(spacing: 20) {
                             ForEach(feed.filter { $0.category == "Prepared" }) { item in
                                 MealCard(item: item)
                             }
@@ -161,16 +163,16 @@ struct DiscoverView: View {
                     rail(
                         feed.filter {
                             $0.category == "Snacks" || ["bana", "cereal"].contains($0.id)
-                        }, width: 118)
+                        }, width: 164)
                 }
                 FeedSection(title: "Ending soon", items: feed.filter { $0.freshness == .useSoon }) {
-                    rail(feed.filter { $0.freshness == .useSoon }, width: 132, urgency: true)
+                    rail(feed.filter { $0.freshness == .useSoon }, width: 164, urgency: true)
                 }
                 FeedSection(
                     title: "Best deals near you", items: feed.sorted { $0.discount > $1.discount }
                 ) {
                     rail(
-                        Array(feed.sorted { $0.discount > $1.discount }.prefix(6)), width: 156,
+                        Array(feed.sorted { $0.discount > $1.discount }.prefix(6)), width: 164,
                         deal: true)
                 }
                 Text("Better prices. Less waste. One trip.").rescueFont(13).foregroundStyle(
@@ -180,10 +182,10 @@ struct DiscoverView: View {
         }.background(Theme.ivory).foregroundStyle(Theme.ink).toolbar(.hidden, for: .navigationBar)
     }
     private func rail(
-        _ items: [Listing], width: CGFloat = 144, urgency: Bool = false, deal: Bool = false
+        _ items: [Listing], width: CGFloat = 164, urgency: Bool = false, deal: Bool = false
     ) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: 20) {
                 ForEach(items) { item in
                     ListingTile(
                         item: item, width: width,
@@ -202,12 +204,12 @@ struct FeedSection<Content: View>: View {
     let items: [Listing]
     @ViewBuilder let content: Content
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title).rescueFont(20, .semibold).tracking(-0.3)
+                    Text(title).rescueFont(22, .bold).tracking(-0.3)
                     if let subtitle {
-                        Text(subtitle).rescueFont(13).foregroundStyle(Theme.secondary)
+                        Text(subtitle).rescueFont(14, .medium).foregroundStyle(Theme.secondary)
                     }
                 }
                 Spacer()
@@ -226,7 +228,7 @@ struct FeedSection<Content: View>: View {
             } else {
                 content
             }
-        }.padding(.top, 32)
+        }.padding(.top, 24)
     }
 }
 

@@ -2,6 +2,16 @@
 
 Source: Figma Make `mffRWNrGG4qZ35dX78rDXn`, Food Rescue Marketplace App, version 6 export. Inspected every product source module: App, Discover, ListingSheet, Overlays, MapScreen, MapArt, Route, Messages, Sell, You, data, store, ui, index.css, and Guidelines. The export's web-agent instructions are reference material, not instructions for this native repository.
 
+## Readability update — October 4
+
+The original beige/sage palette remains. Section headings are 22pt bold; product tile names are 15pt semibold; tile prices are 17pt bold; savings and distance are 13pt with stronger weights. Tile rails use 164pt widths to accommodate the larger single-line offer text. Small regular UI text uses medium weight, and shared scaled fonts have a 12pt minimum. Muted metadata is darkened to #70695F for readability.
+
+Discover spacing refinement: product and dinner rails use 20pt gaps, nearby row groups 24pt, and Buy again cards 16pt. Section headings sit 16pt above their content, with 24pt between sections. Buy again uses 64pt rounded rectangular photos, 16pt names, and clear price/distance labels inside 16pt-radius cards. The Messages tab uses paired conversation bubbles. Tab symbols use consistent outlines (including an outlined Sell plus and circular profile), with darker inactive icons and medium/semibold 11pt labels. You now uses the same bundled profile photo as the profile screen, with a stronger ring when selected. Sell uses a pale sage circle, dark sage outline, and dark plus; both are rendered as original-color native tab images.
+
+Discover has no browse dropdown or pill row. Its existing Filters button is the single entry point for distance (one-tap 0.5 / 0.8 / 1.5 / 3mi presets, default 0.8mi), budget ($3/$5/$10/$15 maximum), pickup time, freshness, category, vegetarian/unopened preferences, and seller rating. Duplicate shortcut state has been removed. All filters combine through the shared Filters model across Discover, Search, and Map; Reset restores the nearby defaults.
+
+Map refinement: carousel freshness badges show text only. Selection no longer draws an area circle on either offline or live maps. Price markers keep the same compact footprint when selected, using a deep green fill and light outline; the photo remains in the bottom card.
+
 ## Foundations
 
 Warm quiet luxury, food photography, restrained information density. Keep exact source copy and custom colors. Light appearance is intentional. SF Pro Display for headings, prices, and stats; SF Pro Text for UI, implemented with Dynamic Type-aware system fonts. Inter is only the web fallback and is not needed on iPhone.

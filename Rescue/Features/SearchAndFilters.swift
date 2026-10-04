@@ -22,7 +22,7 @@ struct SearchView: View {
                     }.accessibilityLabel("Clear search")
                 }
             }.padding(16).card(radius: 16).padding(.horizontal, 20)
-            Text("\(store.selectedPill) and your filters are kept").rescueFont(12).foregroundStyle(
+            Text("Your filters apply to search results").rescueFont(12).foregroundStyle(
                 Theme.muted
             ).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20).padding(
                 .top, 8)
@@ -67,33 +67,50 @@ struct FiltersView: View {
         @Bindable var store = store
         Form {
             Section("Distance") {
-                HStack {
-                    Text("Within")
-                    Spacer()
-                    Text("\(store.filters.distance, specifier: "%.1f") mi").monospacedDigit()
-                }
-                Slider(value: $store.filters.distance, in: 0.2...3, step: 0.1)
+                HStack(spacing: 8) {
+                    ForEach([0.5, 0.8, 1.5, 3.0], id: \.self) { radius in
+                        let selected = store.filters.distance == radius
+                        Button {
+                            store.filters.distance = radius
+                            Haptic.tap()
+                        } label: {
+                            Text(
+                                "\(radius.formatted(.number.precision(.fractionLength(0...1)))) mi"
+                            )
+                            .rescueFont(13, .semibold).lineLimit(1)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .foregroundStyle(selected ? Theme.paper : Theme.ink)
+                            .background(
+                                selected ? Theme.deep : Theme.bone,
+                                in: RoundedRectangle(cornerRadius: 10))
+                        }.buttonStyle(.plain)
+                            .accessibilityLabel("Within \(radius) miles")
+                            .accessibilityAddTraits(selected ? .isSelected : [])
+                            .accessibilityIdentifier("filter-distance-\(radius)")
+                    }
+                }.padding(.vertical, 4)
             }
-            Section("Max price") {
-                HStack {
-                    Text("Price")
-                    Spacer()
-                    Text(Money.text(store.filters.maxPrice))
-                }
-                Slider(
-                    value: Binding(
-                        get: { Double(store.filters.maxPrice) },
-                        set: { store.filters.maxPrice = Int($0) }), in: 100...1500, step: 50)
+            Section("Budget") {
+                Picker("Maximum price", selection: $store.filters.maxPrice) {
+                    Text("Up to $3").tag(300)
+                    Text("Up to $5").tag(500)
+                    Text("Up to $10").tag(1000)
+                    Text("Up to $15").tag(1500)
+                }.accessibilityIdentifier("filter-price")
             }
-            Section("Availability") {
+            Section {
                 Toggle("Available now", isOn: $store.filters.availableNow).accessibilityIdentifier(
                     "filter-now")
                 Toggle("Tonight", isOn: $store.filters.tonight).accessibilityIdentifier(
                     "filter-tonight")
                 Toggle("Tomorrow", isOn: $store.filters.tomorrow).accessibilityIdentifier(
                     "filter-tomorrow")
+            } header: {
+                Text("Pickup time")
+            } footer: {
+                Text("Choose any times that work. Leave all off for any time.")
             }
-            Section("Freshness") {
+            Section {
                 ForEach(Freshness.allCases, id: \.self) { value in
                     Toggle(
                         isOn: Binding(
@@ -105,10 +122,14 @@ struct FiltersView: View {
                                     store.filters.freshness.remove(value)
                                 }
                             })
-                    ) { FreshnessBadge(freshness: value) }
+                    ) { Text(value.rawValue) }
                 }
+            } header: {
+                Text("Freshness")
+            } footer: {
+                Text("Choose any conditions you’re happy with. Leave all off for any condition.")
             }
-            Section("Category") {
+            Section("Food category") {
                 ForEach(categories, id: \.self) { value in
                     Toggle(
                         value,
@@ -123,10 +144,12 @@ struct FiltersView: View {
                             }))
                 }
             }
-            Section("Preferences") {
+            Section("Food preferences") {
                 Toggle("Vegetarian", isOn: $store.filters.vegetarian)
                 Toggle("Unopened", isOn: $store.filters.unopened)
-                Picker("Seller rating", selection: $store.filters.minimumRating) {
+            }
+            Section("Seller") {
+                Picker("Minimum rating", selection: $store.filters.minimumRating) {
                     Text("Any").tag(0.0)
                     Text("4.5+").tag(4.5)
                     Text("4.8+").tag(4.8)
@@ -138,7 +161,6 @@ struct FiltersView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Reset") {
                         store.filters = Filters()
-                        store.selectedPill = "Near Me"
                     }
                 }
             }

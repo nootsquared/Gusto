@@ -113,7 +113,7 @@ public struct Receipt: Identifiable, Sendable {
 }
 
 public struct Filters: Equatable, Sendable {
-    public var distance: Double = 3
+    public var distance: Double = 0.8
     public var maxPrice: Int = 1500
     public var freshness: Set<Freshness> = []
     public var categories: Set<String> = []

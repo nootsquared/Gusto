@@ -7,7 +7,6 @@ import Observation
     public private(set) var cart: [String] = []
     public var filters = Filters()
     public var query = ""
-    public var selectedPill = "Near Me"
     public var savedIDs: Set<String> = []
     public private(set) var checkingIDs: Set<String> = []
     public private(set) var plan: PickupPlan?
@@ -243,15 +242,6 @@ import Observation
     }
     public func visibleListings(query text: String? = nil) -> [Listing] {
         var results = catalog.filter(filters.accepts)
-        switch selectedPill {
-        case "Near Me": results = results.filter { $0.distance <= 0.8 }
-        case "Under $5": results = results.filter { $0.price < 500 }
-        case "Use Soon": results = results.filter { $0.freshness == .useSoon }
-        case "Available Now": results = results.filter { $0.pickup.lowercased().contains("now") }
-        case "Unopened": results = results.filter { !$0.opened }
-        case "Vegetarian": results = results.filter(\.vegetarian)
-        default: break
-        }
         let q = (text ?? query).lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         if q.isEmpty { return results }
         var recognized = false
@@ -334,7 +324,6 @@ import Observation
         cart = []
         filters = Filters()
         query = ""
-        selectedPill = "Near Me"
         plan = nil
         phase = .idle
         stopIndex = 0

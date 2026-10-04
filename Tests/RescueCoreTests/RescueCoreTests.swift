@@ -211,6 +211,17 @@ import XCTest
         store.filters.distance = 0.2
         XCTAssertTrue(store.visibleListings(query: "").isEmpty)
     }
+    func testDistanceFilterCanExpandWithoutHiddenShortcut() {
+        let store = makeStore()
+        XCTAssertFalse(store.visibleListings(query: "").contains { $0.id == "gran" })
+        store.filters.distance = 1.2
+        XCTAssertTrue(store.visibleListings(query: "").contains { $0.id == "gran" })
+        store.filters.maxPrice = 250
+        XCTAssertFalse(store.visibleListings(query: "").contains { $0.id == "gran" })
+        XCTAssertTrue(store.visibleListings(query: "").contains { $0.id == "bread" })
+        store.filters = Filters()
+        XCTAssertEqual(store.filters.distance, 0.8)
+    }
     func testFreshCheckAndChatStayWithCorrectSeller() async {
         let store = makeStore()
         XCTAssertTrue(store.listing("bread")!.stale)

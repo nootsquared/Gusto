@@ -74,7 +74,7 @@ private struct MapListingCard: View {
                 FoodPhoto(name: item.image).frame(width: 82, height: 92).clipShape(
                     RoundedRectangle(cornerRadius: 16))
                 VStack(alignment: .leading, spacing: 5) {
-                    FreshnessBadge(freshness: item.freshness)
+                    FreshnessBadge(freshness: item.freshness, showDot: false)
                     Text(item.name).rescueFont(16, .semibold).lineLimit(1)
                     Text(Money.text(item.price)).rescueFont(19, .semibold)
                     Text("~\(String(format: "%.1f", item.distance)) mi · \(item.pickup)")

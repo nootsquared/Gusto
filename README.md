@@ -20,7 +20,7 @@ Physical-device signing/install requires your Apple account and connected hardwa
 ## Hackathon demo
 
 1. Discover → Organic Strawberries → Reserve. Close the sheet.
-2. Add Greek Yogurt from Buy again, then use Search for Sourdough Loaf and Rigatoni. Reserve both. The default Near Me filter includes all four.
+2. Add Greek Yogurt from Buy again, then use Search for Sourdough Loaf and Rigatoni. Reserve both. The default 0.8mi distance filter includes all four. Filters next to Search combines budget, pickup time, freshness and preferences in one sheet.
 3. Cart shows **4 items, 4 sellers, $7.75 to pay, $14.63 saved, 6.1 lb**. These figures come from the source fixtures.
 4. Plan My Pickups → choose a route preference → Coordinate All.
 5. Accept Nina's later pickup time (or Alternative). Downstream stop times update.

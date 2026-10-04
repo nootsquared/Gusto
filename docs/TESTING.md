@@ -1,5 +1,9 @@
 # Testing and verification
 
+## Unified filters check — October 4, 2026
+
+The small shared core suite passed: 22 tests, 0 failures, including a regression check that expanding distance reveals Maple Granola without a hidden shortcut cap. The single Simulator test `testDiscoveryScreenshotAndEmptyFilterResults` passed: 1 test, 0 failures. Filter screenshots were exported and visually reviewed; the updated app was reopened in Simulator. Result: `work/UnifiedFilters-20261004.xcresult`; logs: `work/unified-filters-core.log`, `work/unified-filters-ui.log`. Full UI flow and device builds were not rerun.
+
 ## Verified on October 3, 2026
 
 | Check | Result |

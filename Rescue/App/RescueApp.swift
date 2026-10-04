@@ -25,17 +25,36 @@ struct RootView: View {
     var body: some View {
         @Bindable var router = router
         TabView(selection: $router.tab) {
-            NavigationStack { DiscoverView() }.tabItem { Label("Discover", systemImage: "safari") }
-                .tag(AppTab.discover)
-            NavigationStack { MarketplaceMapView() }.tabItem { Label("Map", systemImage: "map") }
-                .tag(AppTab.map)
+            NavigationStack { DiscoverView() }.tabItem {
+                Label("Discover", systemImage: "safari").environment(\.symbolVariants, .none)
+            }
+            .tag(AppTab.discover)
+            NavigationStack { MarketplaceMapView() }.tabItem {
+                Label("Map", systemImage: "map").environment(\.symbolVariants, .none)
+            }
+            .tag(AppTab.map)
             NavigationStack { SellView() }.tabItem {
-                Label("Sell", systemImage: "plus.circle.fill")
+                Label {
+                    Text("Sell")
+                } icon: {
+                    Image(uiImage: NavigationArtwork.sell).renderingMode(.original)
+                }
             }.tag(AppTab.sell)
             NavigationStack { MessagesView() }.tabItem {
-                Label("Messages", systemImage: "bubble.left")
+                Label("Messages", systemImage: "bubble.left.and.bubble.right").environment(
+                    \.symbolVariants, .none)
             }.badge(1).tag(AppTab.messages)
-            NavigationStack { ProfileView() }.tabItem { Label("You", systemImage: "person") }.tag(
+            NavigationStack { ProfileView() }.tabItem {
+                Label {
+                    Text("You")
+                } icon: {
+                    Image(
+                        uiImage: router.tab == .you
+                            ? NavigationArtwork.selectedProfile : NavigationArtwork.profile
+                    )
+                    .renderingMode(.original)
+                }
+            }.tag(
                 AppTab.you)
         }.tint(Theme.ink).background(Theme.ivory.ignoresSafeArea())
             .toolbarBackground(Theme.paper, for: .tabBar).toolbarBackground(.visible, for: .tabBar)
