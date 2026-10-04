@@ -18,3 +18,7 @@ Planned final wiring after checks, with both boards powered off while moving wir
 Power each board by its own USB; do not connect the Nano power pins to FREE-WILi. Actual pin orientation and voltages have not been independently measured or visually verified.
 
 Remaining optional physical check: stale-data disappearance/recovery after safely disconnecting and restoring the data connection. Stale handling passed host protocol tests. LCD display is working according to the user; its exact Fahrenheit/Celsius formatting has not been independently photographed. Sensor plausibility is different from calibrated accuracy; no calibrated reference instruments have been used.
+
+BLE discovery update, October 4, 2026: Firmware 013 and the button-controlled Nano sketch uploaded. Blue held two seconds requests a 60-second advertisement window; display pairing cues stop on connection or timeout. Nano USB and 30-second FREE-WILi telemetry checks passed. Diagnostic `ble start`/`ble stop` round trips confirmed Nano advertising and display pairing states. Physical blue button and iPhone connection still need user testing.
+
+Physical Bluetooth check: User held FREE-WILi blue, discovered `MHacks Climate` in LightBlue on iPhone, connected, saw `BLE: CONNECTED`, and heard the pairing beep stop. FREE-WILi display diagnostics independently reported ble=2, pairing=0. The user confirmed changing values on the BLE characteristic in LightBlue; the physical end-to-end path passed.

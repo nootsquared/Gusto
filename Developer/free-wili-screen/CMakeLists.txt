@@ -23,7 +23,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 pico_sdk_init()
 
-set(APP_VERSION 012)
+set(APP_VERSION 013)
 set(FWOG_GIT_DESCRIBE "climate-${APP_VERSION}")
 set(FWOG_GIT_COMMIT_TS 0)
 add_subdirectory("${FWOG_BSP_PATH}/bsp" "${CMAKE_BINARY_DIR}/bsp")

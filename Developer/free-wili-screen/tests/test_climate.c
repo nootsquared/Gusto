@@ -115,11 +115,33 @@ static void test_ping(void) {
     assert(!climate_nonce_valid("123456789012345678901234567890123"));
 }
 
+static void test_ble_control(void) {
+    climate_ble_state_t state;
+    uint8_t start[2], payload[3];
+    climate_ble_start_encode(start);
+    assert(climate_ble_start_decode(start, sizeof start));
+    assert(!climate_ble_start_decode(start, 1));
+    start[1] = 2;
+    assert(!climate_ble_start_decode(start, sizeof start));
+    assert(climate_parse_ble_state("BLE,1,STATE,ADVERTISING", &state));
+    assert(state == CLIMATE_BLE_ADVERTISING);
+    assert(climate_parse_ble_state("BLE,1,STATE,CONNECTED", &state));
+    assert(state == CLIMATE_BLE_CONNECTED);
+    assert(!climate_parse_ble_state("BLE,2,STATE,CONNECTED", &state));
+    assert(!climate_parse_ble_state("BLE,1,STATE,CONNECTED,EXTRA", &state));
+    climate_ble_state_encode(CLIMATE_BLE_ERROR, payload);
+    assert(climate_ble_state_decode(payload, sizeof payload, &state));
+    assert(state == CLIMATE_BLE_ERROR);
+    payload[2] = 4;
+    assert(!climate_ble_state_decode(payload, sizeof payload, &state));
+}
+
 int main(void) {
     test_records();
     test_stream();
     test_payload_and_age();
     test_ping();
+    test_ble_control();
     puts("PASS: receiver parsing, stream recovery, boundaries, NA/masks, payload/ack encoding, stale recovery and nonce validation");
     return 0;
 }

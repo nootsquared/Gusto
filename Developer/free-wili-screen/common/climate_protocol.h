@@ -6,7 +6,16 @@
 
 #define CLIMATE_MESSAGE_SAMPLE 0x30u
 #define CLIMATE_MESSAGE_ACK 0x31u
+#define CLIMATE_MESSAGE_BLE_START 0x32u
+#define CLIMATE_MESSAGE_BLE_STATE 0x33u
 #define CLIMATE_PAYLOAD_SIZE 17u
+
+typedef enum {
+    CLIMATE_BLE_OFF = 0,
+    CLIMATE_BLE_ADVERTISING = 1,
+    CLIMATE_BLE_CONNECTED = 2,
+    CLIMATE_BLE_ERROR = 3
+} climate_ble_state_t;
 
 typedef struct {
     uint32_t sequence;
@@ -37,5 +46,10 @@ void climate_encode(const climate_sample_t *sample, uint8_t out[CLIMATE_PAYLOAD_
 bool climate_decode(const uint8_t *data, size_t length, climate_sample_t *sample);
 void climate_ack_encode(uint32_t sequence, uint8_t out[6]);
 bool climate_ack_decode(const uint8_t *data, size_t length, uint32_t *sequence);
+bool climate_parse_ble_state(const char *line, climate_ble_state_t *state);
+void climate_ble_start_encode(uint8_t out[2]);
+bool climate_ble_start_decode(const uint8_t *data, size_t length);
+void climate_ble_state_encode(climate_ble_state_t state, uint8_t out[3]);
+bool climate_ble_state_decode(const uint8_t *data, size_t length, climate_ble_state_t *state);
 bool climate_state_fresh(const climate_state_t *state, uint32_t now);
 #endif

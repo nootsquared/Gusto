@@ -35,7 +35,7 @@ directories:
   Invoke-Arduino version
   Invoke-Arduino core update-index
   Invoke-Arduino core install arduino:mbed_nano
-  Invoke-Arduino lib install Arduino_HTS221 Arduino_HS300x Arduino_APDS9960
+  Invoke-Arduino lib install Arduino_HTS221 Arduino_HS300x Arduino_APDS9960 ArduinoBLE
   Invoke-Arduino core list
   Invoke-Arduino board list
   return

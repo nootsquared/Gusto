@@ -1,6 +1,6 @@
 # Arduino and FREE-WILi climate setup
 
-The Nano 33 BLE Sense Rev2 reads its onboard HS300x temperature/humidity sensor and APDS9960 light sensor. `nano_climate_sender/nano_climate_sender.ino` sends a `DATA,1,...` record once per second over USB and its TX1 pin at 115200 baud. FREE-WILi receives the data over UART and shows Fahrenheit first (Celsius in parentheses), relative humidity, and raw ambient-light counts. Light counts are not lux.
+The Nano 33 BLE Sense Rev2 reads its onboard HS300x temperature/humidity sensor and APDS9960 light sensor. `nano_climate_sender/nano_climate_sender.ino` sends a `DATA,1,...` record once per second over USB and its TX1 pin at 115200 baud. It exposes the latest reading over Bluetooth Low Energy for the iPhone app when discovery is started by holding FREE-WILi blue for two seconds. FREE-WILi receives the data over UART and shows Fahrenheit first (Celsius in parentheses), relative humidity, and raw ambient-light counts. Light counts are not lux.
 
 ## Nano
 
@@ -13,9 +13,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\arduino.ps1 Upload -Port C
 python .\verify_nano.py --port COM8 --output nano-verification.json
 ```
 
-Close Arduino Serial Monitor before using the commands. COM8 was the Nano port during testing; use `List` again if Windows assigns another number. The Arduino IDE can also compile the sender after installing `Arduino_HS300x` and `Arduino_APDS9960`. The `Upload` command defaults to the earlier `SerialSmokeTest`, so specify `-SketchName nano_climate_sender` to restore the live sender.
+Close Arduino Serial Monitor before using the commands. COM8 was the Nano port during testing; use `List` again if Windows assigns another number. The Arduino IDE can also compile the sender after installing `Arduino_HS300x`, `Arduino_APDS9960`, and `ArduinoBLE`. The `Upload` command defaults to the earlier `SerialSmokeTest`, so specify `-SketchName nano_climate_sender` to restore the live sender.
 
 `SensorTenSecondTest` and `record-sensors.ps1` are earlier standalone checks. `SerialSmokeTest` and `arduino.ps1 Test` are earlier USB command checks. Arduino CLI, libraries, toolchains, build outputs, and local port configuration are ignored by Git.
+
+BLE integration is specified in `BLE_PROTOCOL.md`. Hold FREE-WILi blue for two seconds to begin a 60-second discovery window; its blue lights and beep stop when an app connects. The phone should scan for `MHacks Climate` and subscribe to the 17-byte data characteristic. To check whether the Nano started advertising, send `BLE_STATUS` followed by a newline to its USB serial port at 115200 baud; the reply should include `BLE_READY=1`.
 
 ## Wiring
 

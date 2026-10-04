@@ -10,6 +10,15 @@ FWOG_POWER_DEFAULT();
 
 static climate_state_t climate;
 static fwog_link_rx_t main_receiver;
+static climate_ble_state_t ble_state;
+static bool ble_state_received;
+static uint32_t ble_state_ms;
+static bool pair_pending;
+static uint32_t pair_started_ms;
+static uint32_t pair_cycle_ms;
+static bool blue_was_down;
+static bool blue_hold_triggered;
+static uint32_t blue_down_ms;
 
 #define WARNING_PERIOD_MS 1500u
 #define WARNING_FLASH_MS 250u
@@ -40,9 +49,9 @@ static void prepare_warning_beep(void) {
     }
 }
 
-static void show_warning_leds(bool lit) {
+static void show_warning_leds(bool warning_lit, bool pairing_lit) {
     for (unsigned i = 0u; i < FWOG_LED_COUNT; i++) {
-        ws2812_set_color(i, lit ? 64u : 0u, 0u, 0u);
+        ws2812_set_color(i, warning_lit && !pairing_lit ? 64u : 0u, 0u, pairing_lit ? 64u : 0u);
     }
     ws2812_process();
 }
@@ -58,6 +67,37 @@ static void draw_layout(void) {
     lcd_text_draw(16u, 34u, "TEMPERATURE (F)", 2u, muted, background);
     lcd_text_draw(16u, 94u, "HUMIDITY (%)", 2u, muted, background);
     lcd_text_draw(16u, 154u, "AMBIENT LIGHT (COUNTS)", 2u, muted, background);
+}
+
+static bool ble_fresh(uint32_t now) {
+    return ble_state_received && (uint32_t)(now - ble_state_ms) < 4000u;
+}
+
+static bool pairing_active(uint32_t now) {
+    return pair_pending || (ble_fresh(now) && ble_state == CLIMATE_BLE_ADVERTISING);
+}
+
+static void draw_ble_status(uint32_t now) {
+    const uint16_t background = st7789_rgb565(12, 18, 28);
+    const char *label = "BLE: OFF";
+    uint16_t color = st7789_rgb565(150, 165, 185);
+    if (pair_pending) {
+        label = "BLE: STARTING";
+        color = st7789_rgb565(90, 150, 255);
+    } else if (!ble_fresh(now)) {
+        label = "BLE: NO LINK";
+    } else if (ble_state == CLIMATE_BLE_ADVERTISING) {
+        label = "BLE: PAIRING";
+        color = st7789_rgb565(90, 150, 255);
+    } else if (ble_state == CLIMATE_BLE_CONNECTED) {
+        label = "BLE: CONNECTED";
+        color = st7789_rgb565(80, 225, 135);
+    } else if (ble_state == CLIMATE_BLE_ERROR) {
+        label = "BLE: ERROR";
+        color = st7789_rgb565(255, 80, 80);
+    }
+    st7789_fill_rect(16u, 210u, 288u, 24u, background);
+    lcd_text_draw(16u, 210u, label, 2u, color, background);
 }
 
 static void draw_warning_icon(uint16_t x, uint16_t y, bool visible) {
@@ -122,7 +162,7 @@ int main(void) {
     const bool link_ready = fwog_link_uart_init(FWOG_LINK_BAUD);
     fwog_link_rx_init(&main_receiver);
     const bool leds_ready = ws2812_init(pio0, 0u);
-    show_warning_leds(false);
+    show_warning_leds(false, false);
     prepare_warning_beep();
     const bool audio_ready = i2s_audio_init(pio0, 2u);
     if (audio_ready) {
@@ -142,6 +182,7 @@ int main(void) {
     if (panel_ready) {
         draw_layout();
         draw_readings(to_ms_since_boot(get_absolute_time()), 0u, false);
+        draw_ble_status(to_ms_since_boot(get_absolute_time()));
         st7789_dma_wait();
         board_backlight(255);
     }
@@ -150,6 +191,7 @@ int main(void) {
     uint8_t warning_mask = 0u;
     bool flash_shown = false;
     bool leds_lit = false;
+    bool leds_blue = false;
     bool power_was_armed = false;
     bool fresh_shown = false;
     uint32_t warning_cycle_ms = 0u;
@@ -158,6 +200,7 @@ int main(void) {
         const fwog_power_t power = fwog_power_poll(now);
         i2s_audio_process();
         bool sample_changed = false;
+        bool ble_changed = false;
         uint8_t byte;
         size_t length;
         unsigned budget = 0;
@@ -165,7 +208,15 @@ int main(void) {
             if (!fwog_link_rx_byte(&main_receiver, byte, &length)) continue;
             if (fwog_ioexp_link_handle(main_receiver.buf, length)) continue;
             climate_sample_t sample;
-            if (climate_decode(main_receiver.buf, length, &sample)) {
+            climate_ble_state_t incoming_ble;
+            if (climate_ble_state_decode(main_receiver.buf, length, &incoming_ble)) {
+                ble_state = incoming_ble;
+                ble_state_ms = now;
+                ble_state_received = true;
+                if (incoming_ble != CLIMATE_BLE_OFF || !pair_pending ||
+                    (uint32_t)(now - pair_started_ms) >= 5000u) pair_pending = false;
+                ble_changed = true;
+            } else if (climate_decode(main_receiver.buf, length, &sample)) {
                 climate.sample = sample;
                 climate.received_ms = now;
                 climate.received = true;
@@ -174,6 +225,32 @@ int main(void) {
         }
 
         bool beep_due = false;
+        const bool blue_down = (power.buttons.down & FWOG_BTN_BIT(FWOG_BTN_BLUE)) != 0u;
+        if (blue_down && !blue_was_down) blue_down_ms = now;
+        if (!blue_down) blue_hold_triggered = false;
+        if (blue_down && !blue_hold_triggered &&
+            (uint32_t)(now - blue_down_ms) >= 2000u) {
+            blue_hold_triggered = true;
+            uint8_t request[2];
+            climate_ble_start_encode(request);
+            if (link_ready && fwog_link_uart_send_frame(request, sizeof request)) {
+                pair_pending = true;
+                pair_started_ms = now;
+                pair_cycle_ms = now;
+                beep_due = true;
+                ble_changed = true;
+                DIAG("[climate_display] BLE_BUTTON_START\n");
+            } else DIAG("[climate_display] BLE_BUTTON_ERROR link_down\n");
+        }
+        blue_was_down = blue_down;
+        if (pair_pending && (uint32_t)(now - pair_started_ms) >= 5000u) {
+            pair_pending = false;
+            ble_changed = true;
+        }
+        if (pairing_active(now) && (uint32_t)(now - pair_cycle_ms) >= 1500u) {
+            pair_cycle_ms = now;
+            beep_due = true;
+        }
 
         const uint8_t toggled = power.buttons.pressed & WARNING_BUTTONS;
         if (toggled) {
@@ -209,16 +286,20 @@ int main(void) {
         const bool light_on =
             warning_enabled && (now - warning_cycle_ms < WARNING_FLASH_MS);
 
+        const bool blue_on = pairing_active(now) &&
+                             (uint32_t)(now - pair_cycle_ms) < WARNING_FLASH_MS;
         if (leds_ready && !power.armed &&
-            (light_on != leds_lit || power_was_armed)) {
-            show_warning_leds(light_on);
+            (light_on != leds_lit || blue_on != leds_blue || power_was_armed)) {
+            show_warning_leds(light_on, blue_on);
             leds_lit = light_on;
+            leds_blue = blue_on;
         }
         power_was_armed = power.armed;
         const bool refresh_due = time_reached(next_reading);
         const bool fresh = climate_state_fresh(&climate, now);
-        if (panel_ready && (refresh_due || sample_changed || toggled || light_on != flash_shown || fresh != fresh_shown)) {
+        if (panel_ready && (refresh_due || sample_changed || toggled || ble_changed || light_on != flash_shown || fresh != fresh_shown)) {
             draw_readings(now, warning_mask, light_on);
+            draw_ble_status(now);
             st7789_dma_wait();
             if (sample_changed) {
                 uint8_t acknowledgment[6];
@@ -231,13 +312,14 @@ int main(void) {
         if (refresh_due) {
             next_reading = make_timeout_time_ms(1000);
             DIAG("[climate_display] received=%u fresh=%u sequence=%lu mask=%u "
-                 "panel=%s warnings=0x%02x leds=%s audio=%s ioexp=%u link=%u\n",
+                 "panel=%s warnings=0x%02x leds=%s audio=%s ioexp=%u link=%u ble=%u pairing=%u\n",
                  climate.received, climate_state_fresh(&climate, now),
                  (unsigned long)climate.sample.sequence, climate.sample.valid_mask,
                  panel_ready ? "ready" : "init-failed",
                  (unsigned)warning_mask,
                  leds_ready ? "ready" : "init-failed",
-                 audio_ready ? "ready" : "init-failed", board_ioexp_ok(), link_ready);
+                 audio_ready ? "ready" : "init-failed", board_ioexp_ok(), link_ready,
+                 ble_fresh(now) ? (unsigned)ble_state : 255u, pairing_active(now));
         }
         sleep_ms(2);
     }

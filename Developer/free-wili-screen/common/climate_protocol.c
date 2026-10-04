@@ -159,3 +159,30 @@ bool climate_ack_decode(const uint8_t *data, size_t length, uint32_t *sequence) 
 bool climate_state_fresh(const climate_state_t *state, uint32_t now) {
     return state->received && (uint32_t)(now - state->received_ms) < 5000;
 }
+
+bool climate_parse_ble_state(const char *line, climate_ble_state_t *state) {
+    if (!strcmp(line, "BLE,1,STATE,OFF")) *state = CLIMATE_BLE_OFF;
+    else if (!strcmp(line, "BLE,1,STATE,ADVERTISING")) *state = CLIMATE_BLE_ADVERTISING;
+    else if (!strcmp(line, "BLE,1,STATE,CONNECTED")) *state = CLIMATE_BLE_CONNECTED;
+    else if (!strcmp(line, "BLE,1,STATE,ERROR")) *state = CLIMATE_BLE_ERROR;
+    else return false;
+    return true;
+}
+void climate_ble_start_encode(uint8_t out[2]) {
+    out[0] = CLIMATE_MESSAGE_BLE_START;
+    out[1] = 1;
+}
+bool climate_ble_start_decode(const uint8_t *data, size_t length) {
+    return length == 2 && data[0] == CLIMATE_MESSAGE_BLE_START && data[1] == 1;
+}
+void climate_ble_state_encode(climate_ble_state_t state, uint8_t out[3]) {
+    out[0] = CLIMATE_MESSAGE_BLE_STATE;
+    out[1] = 1;
+    out[2] = (uint8_t)state;
+}
+bool climate_ble_state_decode(const uint8_t *data, size_t length, climate_ble_state_t *state) {
+    if (length != 3 || data[0] != CLIMATE_MESSAGE_BLE_STATE || data[1] != 1 ||
+        data[2] > CLIMATE_BLE_ERROR) return false;
+    *state = (climate_ble_state_t)data[2];
+    return true;
+}
