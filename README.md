@@ -1,4 +1,4 @@
-# Rescue — native iPhone demo
+# Gusto — native iPhone demo
 
 SwiftUI iPhone app for rescuing food, iOS 17+. Normal launches select the Maincloud database
 `mhacks-pranav-dev-975fp`. Sign in through SpacetimeAuth using Google. First sign-in
@@ -37,15 +37,15 @@ Physical-device signing/install requires your Apple account and connected hardwa
 3. Cart shows **4 items, 4 sellers, $7.75 to pay, $14.63 saved, 6.1 lb**. These figures come from the source fixtures.
 4. Plan My Pickups → choose a route preference → Coordinate All.
 5. Accept Nina's later pickup time (or Alternative). Downstream stop times update.
-6. Start rescue run → tap the Next seller card → Simulate arrival → I'm Here → Looks good → Pay.
-7. After Rescued, tap Next pickup. Repeat for the remaining sellers. At the last stop, tap See your impact.
+6. Start pickups → tap the Next seller card → Simulate arrival → I'm Here → Looks good → Pay.
+7. After Picked up, tap Next pickup. Repeat for the remaining sellers. At the last stop, tap See your impact.
 8. Done enters You with updated impact. Purchases & Sales shows local demo receipts.
 
 Payment buttons simulate payment and never charge money. Photos in pickup verification are clearly marked as reference photos. Report issue skips a seller without adding a receipt or impact. Fixture-mode reservations last for the demo session. Backend-mode reservations use an exclusive, server-controlled 30-minute hold; confirmed bookings last through the agreed pickup window plus 15 minutes.
 
 Other flows: Map price pins and carousel, search and filters, Fresh Check, editable chat and quick replies, mock photo scan → safety confirmation → local listing, saved items, impact charts, alerts, and native invitation sharing.
 
-**Offline demo:** all 26 source photos are bundled. The default map recreates the Figma MapArt locally. You → Settings → Use live MapKit basemap enables Apple map tiles; coordinates remain fixed demo locations. In fixture mode, Settings → Reset demo restores fixtures. In backend mode, Clear device cache and refresh only clears this device and never resets shared server data.
+**Offline demo:** all 26 source photos are bundled. The marketplace uses interactive Apple Maps with seller clustering, selected/GPS location centering, and cloud searches for the visible area. Map tiles need internet. Pickup route previews retain an offline demo map; You → Settings → Live maps for pickup routes enables Apple map tiles for those previews. In fixture mode, Settings → Reset demo restores fixtures. In backend mode, Clear device cache and refresh only clears this device and never resets shared server data.
 
 ## Tests and development
 
@@ -71,3 +71,23 @@ Xcode: ⌘U runs unit and UI tests. See `docs/TESTING.md` for precise commands, 
 - `docs/ASSETS.json`: exact photo URLs and local asset availability.
 
 This repository is intentionally left uncommitted. The user handles Git commits and pushes.
+
+The visible app name is Gusto. Existing Rescue target names, bundle ID, OAuth callback, and Keychain identifiers are retained for connection and session compatibility.
+
+Tap the location below the Discover heading to use foreground GPS or search for a city, neighborhood, or address. Gusto requests When In Use permission on the first connected launch; manual choices persist on the device. Distances and nearby filters use the chosen coordinates. Sample seller locations remain fictional Ann Arbor locations.
+
+Discover search is inline: type into the top field to show matching food on the same scrollable page. Empty search shows available categories, not seeded search history; Cancel returns to the discovery feed.
+
+On Map, Choose location opens a dropdown for GPS or live Apple Maps address/place matches. Selecting a match centers the map and adds a green location pin; the choice is saved on this device. No additional address service or database setup is required.
+
+Adding food to your cart saves it without reserving inventory or contacting sellers. In the cart, **Confirm & plan pickups** starts the inventory holds and creates a plan; contacting sellers is a separate next step. Saved items may become unavailable before confirmation.
+
+## Scan and private food collection
+
+The middle tab is **Scan**. Capture a camera photo or choose one through Apple's photo picker, review the on-device food suggestion, and save a private inventory item. Apple Vision can suggest common foods; variety, condition and quantity require review. No Gemini key is bundled in the app. Gemini extraction remains an integration step after a server endpoint/project is supplied.
+
+Items and compressed JPEGs persist in private Maincloud `food_inventory` records. This prototype limits each account to 50 items and each image to 65 KB; a production photo pipeline should use your Google Cloud Storage bucket. Only explicit **Sell this item** publishes its photo and creates a marketplace listing after price, allergens, a selected map address, pickup dates and four individual attestations. The app never calls AI output verified.
+
+The sensor panel supports Bluetooth discovery, connection and disconnection. It does not interpret unknown characteristics. Firmware service/characteristic UUIDs, packet shape and units are needed for live ingestion. The authenticated `sensor_reading` API accepts Celsius, percent relative humidity and lux and retains up to 500 samples per account. Recent summaries use matching item/device samples from the last three days, after the scan date; absent measurements remain blank. Bluetooth pairing alone does not mean monitoring is active.
+
+There is no calibrated expiry model yet. Storage references for tomatoes and Cavendish bananas link to UC Davis; these are handling guides, not safety/expiry predictions. Without a sensor, scanning and selling still work, with no fabricated tracking values.

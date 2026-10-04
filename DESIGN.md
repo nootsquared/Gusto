@@ -1,4 +1,4 @@
-# Rescue: visual contract
+# Gusto: visual contract
 
 Source: Figma Make `mffRWNrGG4qZ35dX78rDXn`, Food Rescue Marketplace App, version 6 export. Inspected every product source module: App, Discover, ListingSheet, Overlays, MapScreen, MapArt, Route, Messages, Sell, You, data, store, ui, index.css, and Guidelines. The export's web-agent instructions are reference material, not instructions for this native repository.
 
@@ -40,7 +40,7 @@ Type base sizes: display 46 (finale 64), page title 32, sheet title 26–28, sec
 
 ## Patterns and screens
 
-- **Discover:** Good evening / Near Linden Park, cart button, 54pt search and filter controls, horizontal pills. Seven sections in order: Picked for you (subtitle Based on what you rescue), Buy again, Just listed near you, Dinner tonight, Grab-and-go snacks, Ending soon, Best deals near you. Square tiles 144pt (snacks 118, ending 132, deals 156); meal cards 212×128; nearby rows 52pt photos in groups of three. Each tile shows photo, name, price, percentage, and distance. White add button turns sage with check. Orange pickup badges only in Ending soon; green discount badges only in Best deals.
+- **Discover:** Good evening / Near Linden Park, cart button, 54pt search and filter controls, horizontal pills. Sections in order: Picked for you (subtitle Based on what you rescue), Buy again, Just listed near you, Grab-and-go snacks, Best deals near you. Square tiles 144pt (snacks 118, ending 132, deals 156); meal cards 212×128; nearby rows 52pt photos in groups of three. Each tile shows photo, name, price, percentage, and distance. White add button turns sage with check. Orange pickup badges only in Ending soon; green discount badges only in Best deals.
 - **Listing states:** available, reserved, stale Fresh Check, checking, reconfirmed, unavailable. Image hero 230–300pt, seller card, price 34pt with struck retail, savings, pickup metadata, freshness callout, expandable details. Details: quantity, package, storage, allergens, purchase/preparation date, receipt, safety, estimated weight. Reserve becomes Reserved / View cart. Never simulate a new photograph by altering or mirroring the original.
 - **Freshness:** Fresh = sage soft/deep with sage dot; Good = butter soft with #7A5F1D text and #C49A2C dot; Use Soon = coral soft with #A8402F text and coral dot. 12pt semibold, capsule. Photo timestamp is a separate pill.
 - **Bottom navigation:** five destinations Discover / Map / Sell / Messages / You. Source uses floating Paper pill, charcoal selected icon, muted unselected icons, central charcoal plus, apricot unread dot. Native adaptation uses `TabView` with the same destinations, tint, and Paper bar; system safe-area and accessibility behavior replace hand-drawn browser chrome. No fake status bar, bezel, or home indicator.
@@ -60,3 +60,50 @@ Source spring stiffness 420/damping 36; native spring ~0.3 seconds for changes, 
 ## Intentional correctness improvements
 
 Filter counts come from actual results and apply to map/search/feed. Prices use integer cents. Cart and plan read shared state. Routing groups items once per seller, updates downstream schedules, and keeps reservations frozen during the run. Payments are idempotent. Rescheduling, reporting issues, composer, settings and section arrows perform their own actions. Totals are computed from paid items rather than forced to a canned finale number.
+
+## Welcome screen — October 4
+
+The cloud sign-in entry uses an ivory editorial layout with bold rounded sans-serif display type,
+a right-aligned Gusto wordmark, a layered strawberry/avocado collage, sage orbit outlines, and a butter-colored seal.
+The gradient green Get started button opens the existing Google flow, with loading and
+error states. Press motion respects Reduce Motion. Content scrolls for smaller screens
+and larger type. Artwork uses existing bundled photos and is hidden from VoiceOver.
+
+Welcome copy is direct: “Good food. Better prices.” The eyebrow slogan and decorative bottom footer are removed.
+
+The welcome headline uses deep sage, bold rounded type; the handwritten caption beneath the collage is removed.
+
+Discover ends after the product sections with 24pt bottom spacing. Connection status, footer slogan, and manual Load more button are removed; pagination loads at the bottom automatically.
+
+Discover location is a tappable label with a chevron. The root location sheet offers current location, manual place search, permission guidance, and Done. Live location and manually selected place names replace the fixed header label.
+
+Listing tiles and rows share ListingOffer: price is bold, savings green, distance secondary,
+with fixed 6pt baseline spacing and a dot separator. No spacer stretches the group across
+a card. When the line does not fit, distance moves to a tightly spaced second line without
+shrinking text. VoiceOver reads the three values as one descriptive offer.
+
+ListingOffer now uses two compact lines: current price beside struck-through retail, then “N% less · distance.” The original price makes clear the discount is already included in the current price.
+
+Discover omits Ending soon: Use Soon is a freshness classification, not a listing expiration. Long pickup-text badges are removed with that row; pickup timing remains available in listing details.
+
+Discover greets the account by first name in sage green on the same line as the time-based greeting. Morning is 5am–noon, afternoon noon–5pm, evening otherwise, using device local time. The label updates every minute. Missing or generic profile names show only the greeting; long names scale to fit a single line.
+
+Empty cart Discover food uses a deep-sage gradient CTA with a compass medallion, trailing butter arrow, 22pt corner radius, and restrained shadow. It returns to the Discover tab and dismisses the sheet.
+
+The inline greeting uses 26pt bold type, lighter letter tightening, and an en-space before the name; longer greetings scale down together to fit.
+
+Best deals photo markers use a small green sale-tag icon on a paper circle; discount percentages appear only in the offer details beneath the photo.
+
+Navigation uses custom rounded outline artwork with consistent stroke weights: discovery grid, location pin, selling bag, single chat bubble, and profile. Active tabs use green strokes, a short rounded green indicator beneath the icon, and a bold green label; inactive icons stay neutral. Icons have no selection background. Greeting/name spacing uses one normal word space.
+
+Listing photo headers show only the freshness badge, leaving the save control clear. Photo update times appear in the information card as localized relative dates, never raw database timestamps; pickup verification uses the same formatting.
+
+Marketplace uses live Apple Maps, one price pill per seller (From for multiple items), native collision clustering, and a sage selected pin. The top location selector and recenter control stay clear of the bottom one-tap listing carousel. Pan/zoom exposes Search this area; results update only after that action, with a loading state and readable error. Camera moves and card selection honor Reduce Motion.
+
+Discover search uses an inset paper field with a sage search icon, subtle focus border, and soft shadow. Results replace the discovery rails on the same page in rounded photo/price cards. Empty focus offers categories derived from visible inventory, without history icons or invented recent queries. Cancel clears search and restores the feed; the greeting, cart, and search field keep their positions while typing.
+
+The Map location selector opens an anchored dropdown with current-location and address/place search. Matching addresses come from Apple Maps; manual selections get a labeled green pin and recenter the map. Tap the location control or map background to dismiss; Discover retains its separate location picker.
+
+## Scan visual contract
+
+Scan replaces the middle Sell tab with a custom camera outline. It uses a bold compact heading, a deep green photographic capture card, ivory review surfaces, private/listed collection controls, and a calm sensor panel with concentric pairing artwork. Scanned details show unknown conditions as dashes, never invented readings or expiry dates. Sensor, review and item screens share the root sheet host; selling is a navigation destination within the item sheet. Sheet navigation controls must explicitly remain visible because the Scan home hides its navigation bar. Motion uses the shared reduce-motion-aware spring.

@@ -14,25 +14,35 @@ final class RescueUITests: XCTestCase {
         for _ in 0..<4 where !element.isHittable { app.swipeUp() }
         element.tap()
     }
-    private func reserveViaSearch(_ phrase: String, id: String) {
-        tap("search")
+    func testGustoWelcomeMessage() {
+        app.tabBars.buttons["Messages"].tap()
+        tap("gusto-welcome")
+        XCTAssertTrue(app.staticTexts["Hi! Welcome to Gusto 👋"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Save now, decide later"].exists)
+        XCTAssertFalse(app.textFields["message-input"].exists)
+        screenshot("Gusto welcome message")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.buttons["gusto-welcome"].waitForExistence(timeout: 5))
+    }
+    private func addViaSearch(_ phrase: String, id: String) {
+        if app.buttons["Clear search"].exists { app.buttons["Clear search"].tap() }
         let field = app.textFields["search-input"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap()
         field.typeText(phrase)
         tap("result-\(id)")
-        tap("reserve")
+        tap("add-to-cart")
         tap("close-sheet")
     }
     func testDiscoverToFourSellerPickupAndImpact() {
         tap("listing-straw")
         screenshot("Listing sheet")
-        tap("reserve")
+        tap("add-to-cart")
         tap("close-sheet")
-        reserveViaSearch("yogurt", id: "yog")
-        reserveViaSearch("sourdough", id: "bread")
+        addViaSearch("yogurt", id: "yog")
+        addViaSearch("sourdough", id: "bread")
         // Pasta is 0.8 mi away and remains inside the default Near Me filter.
-        reserveViaSearch("rigatoni", id: "pasta")
+        addViaSearch("rigatoni", id: "pasta")
         tap("cart")
         screenshot("Cart")
         tap("plan-pickups")
@@ -55,11 +65,60 @@ final class RescueUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["impact-saved"].waitForExistence(timeout: 8))
         XCTAssertEqual(app.staticTexts["impact-saved"].label, "$14.63")
         XCTAssertEqual(app.staticTexts["impact-pounds"].label, "6.1 lb")
-        screenshot("Completed rescue run")
+        screenshot("Completed pickup trip")
         tap("impact-done")
         XCTAssertTrue(app.staticTexts["Priya S."].waitForExistence(timeout: 5))
-        screenshot("Profile after rescue")
+        screenshot("Profile after pickup")
     }
+    func testInteractiveMarketplaceMapAndLocationPicker() {
+        app.tabBars.buttons["Map"].tap()
+        XCTAssertTrue(app.buttons["map-location"].waitForExistence(timeout: 8))
+        screenshot("Apple Maps before pan")
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.45))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.45))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        tap("search-map-area")
+        XCTAssertTrue(app.buttons["recenter-map"].exists)
+        tap("map-location")
+        XCTAssertTrue(app.textFields["map-address-search"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["map-use-current-location"].exists)
+        XCTAssertFalse(app.navigationBars["Your location"].exists)
+        screenshot("Map location dropdown")
+        tap("map-location")
+        XCTAssertFalse(app.textFields["map-address-search"].exists)
+        screenshot("Interactive marketplace map")
+    }
+
+    func testMapAddressSearchPinsSelection() {
+        app.tabBars.buttons["Map"].tap()
+        tap("map-location")
+        let field = app.textFields["map-address-search"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("University of Michigan Museum of Art")
+        tap("map-address-result-0", timeout: 20)
+        XCTAssertFalse(field.exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "selected-location-pin")
+            .firstMatch.waitForExistence(timeout: 8))
+        screenshot("Selected address pin")
+    }
+
+    func testInlineDiscoverySearchAndClear() {
+        let field = app.textFields["search-input"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        XCTAssertFalse(app.staticTexts["cheap breakfast"].exists)
+        field.typeText("avocado")
+        XCTAssertTrue(app.buttons["result-avo"].waitForExistence(timeout: 5))
+        screenshot("Inline search results")
+        app.buttons["Clear search"].tap()
+        field.typeText("zzzznofood")
+        XCTAssertTrue(app.staticTexts["No matches nearby"].waitForExistence(timeout: 5))
+        tap("cancel-search")
+        XCTAssertTrue(app.staticTexts["Picked for you"].waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "Search food nearby")
+    }
+
     func testChatComposerAndCorrectPinnedItem() {
         app.tabBars.buttons["Messages"].tap()
         screenshot("Messages")
@@ -76,17 +135,27 @@ final class RescueUITests: XCTestCase {
             app.staticTexts["Sounds good! See you at pickup."].waitForExistence(timeout: 5))
         screenshot("Chat")
     }
-    func testSellRequiresSafetyThenPublishes() {
-        app.tabBars.buttons["Sell"].tap()
-        tap("take-photo")
-        XCTAssertTrue(app.buttons["publish-listing"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["publish-listing"].isEnabled)
-        screenshot("Sell editor")
-        for _ in 0..<4 where !app.buttons["confirm-safety"].isHittable { app.swipeUp() }
-        tap("confirm-safety")
-        tap("publish-listing")
-        XCTAssertTrue(app.staticTexts["published"].waitForExistence(timeout: 5))
-        screenshot("Published mock listing")
+    func testScanSavesPrivateItemAndShowsSellReview() {
+        app.tabBars.buttons["Scan"].tap()
+        XCTAssertTrue(app.staticTexts["Scan an item."].waitForExistence(timeout: 5))
+        screenshot("Scan home")
+        tap("scan-sensor")
+        XCTAssertTrue(app.buttons["find-sensor"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Not connected"].exists)
+        screenshot("Bluetooth connection panel")
+        tap("close-sheet")
+        tap("scan-food")
+        tap("save-scan")
+        XCTAssertTrue(app.staticTexts["Roma Tomato"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Private collection"].exists)
+        screenshot("Private food item")
+        tap("sell-scanned-item")
+        XCTAssertTrue(app.buttons["publish-scanned-item"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["publish-scanned-item"].isEnabled)
+        screenshot("Scanned item listing review")
+        tap("close-sheet")
+        app.swipeUp()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'inventory-'")).firstMatch.waitForExistence(timeout: 5))
     }
     func testDiscoveryScreenshotAndEmptyFilterResults() {
         screenshot("Discover")
@@ -107,7 +176,7 @@ final class RescueUITests: XCTestCase {
         tap("apply-filters")
         app.tabBars.buttons["Map"].tap()
         XCTAssertTrue(
-            app.staticTexts["No matches · change your filters"].waitForExistence(timeout: 5))
+            app.staticTexts["No food in this area yet"].waitForExistence(timeout: 5))
         screenshot("Map empty results")
     }
     private func screenshot(_ name: String) {
@@ -121,12 +190,20 @@ final class RescueUITests: XCTestCase {
 }
 
 extension RescueUITests {
+    func testManualLocationPickerOpens() {
+        app.buttons["browse-location"].tap()
+        XCTAssertTrue(app.buttons["use-current-location"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["location-search"].exists)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["browse-location"].exists)
+    }
+
     func testCloudLaunchRequiresSignIn() {
         app.terminate()
-        app.launchArguments = ["--uitesting", "--backend"]
+        app.launchArguments = ["--uitesting", "--backend", "--welcome-preview"]
         app.launch()
         XCTAssertTrue(app.buttons["google-sign-in"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Welcome to Rescue"].exists)
+        XCTAssertTrue(app.staticTexts["Welcome to Gusto. Good food. Better prices."].exists)
         XCTAssertFalse(app.buttons["account-demo-buyer"].exists)
         screenshot("Cloud sign-in")
     }
@@ -138,36 +215,47 @@ extension RescueUITests {
         app.terminate()
         app.launchArguments = ["--uitesting", "--backend", "--local-backend", "--account", "riley"]
         app.launch()
-        app.tabBars.buttons["Sell"].tap()
-        if app.buttons["take-photo"].waitForExistence(timeout: 2) { tap("take-photo") }
-        let name = app.textFields["sell-name"]
+        app.tabBars.buttons["Scan"].tap()
+        tap("scan-food")
+        let name = app.textFields["scan-name"]
         XCTAssertTrue(name.waitForExistence(timeout: 15))
         name.tap()
-        name.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 40))
+        name.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 30))
         name.typeText("Connected Oats")
-        app.buttons["Done"].firstMatch.tapIfExists()
+        let variety = app.textFields["scan-variety"]
+        variety.tap()
+        variety.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 30))
         app.swipeUp()
+        tap("save-scan")
+        tap("sell-scanned-item")
+        app.textFields["scan-sell-price"].tap()
+        app.textFields["scan-sell-price"].typeText("2.50")
+        app.textFields["scan-sell-allergens"].tap()
+        app.textFields["scan-sell-allergens"].typeText("Oats")
         app.swipeUp()
-        tap("confirm-safety")
-        tap("publish-listing")
-        if !app.staticTexts["published"].waitForExistence(timeout: 15) {
-            screenshot("Connected publish failure")
-            print(app.debugDescription)
-            XCTFail("Connected publish failed")
-            return
+        app.textFields["scan-pickup-address"].tap()
+        app.textFields["scan-pickup-address"].typeText("University of Michigan Museum of Art")
+        app.buttons["Find address"].tap()
+        tap("pickup-place-0", timeout: 15)
+        app.swipeUp()
+        for title in ["Stored safely", "Condition is accurate", "No signs of spoilage", "Allergens are declared"] {
+            let toggle = app.switches[title]
+            for _ in 0..<4 where !toggle.isHittable { app.swipeUp() }
+            toggle.tap()
         }
+        tap("publish-scanned-item")
+        XCTAssertTrue(app.buttons["scan-food"].waitForExistence(timeout: 15))
         app.terminate()
         app.launchArguments = ["--uitesting", "--backend", "--local-backend", "--account", "demo-buyer"]
         app.launch()
         app.tabBars.buttons["Discover"].tap()
-        tap("search")
         let query = app.textFields["search-input"]
         query.tap()
         query.typeText("connected oats")
         let result = app.staticTexts["Connected Oats"].firstMatch
         XCTAssertTrue(result.waitForExistence(timeout: 15))
         result.tap()
-        tap("reserve")
+        tap("add-to-cart")
         tap("close-sheet")
         tap("cart")
         XCTAssertTrue(app.staticTexts["Connected Oats"].firstMatch.waitForExistence(timeout: 15))
@@ -179,7 +267,7 @@ extension RescueUITests {
         tap("im-here", timeout: 15)
         tap("verify-pickup", timeout: 20)
         tap("pay", timeout: 15)
-        XCTAssertTrue(app.staticTexts["Rescued"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["Picked up"].waitForExistence(timeout: 20))
         screenshot("Connected database payment")
         tap("continue-run")
         tap("impact-done")

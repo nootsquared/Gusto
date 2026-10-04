@@ -165,3 +165,30 @@ Cloud catalog verification (October 4): `seed_cloud_catalog` installed 200 listi
 not duplicate records; an anonymous call was rejected with `unauthorized`. Simulator
 verification showed populated Discover cards and bundled sample photos using the saved
 Google session. Local simulation remained disabled on Maincloud.
+
+Location integration: the core suite passed 36 tests (1 live-backend test skipped),
+including distance recalculation, nearby filtering, and invalid coordinate rejection.
+`testManualLocationPickerOpens` passed in Simulator; the unsigned iPhone Release build
+passed. A normal cloud launch visibly displayed the Gusto When In Use permission prompt.
+Actual device movement, reverse-geocoded names, and live Apple place search still need
+physical-device/network verification. Simulator location was set to Ann Arbor.
+
+Deterministic `--uitesting` runs do not resume GPS or apply device coordinates to fixture listing distances; location recalculation is verified in core tests. Normal launches use the live location adapter.
+
+`testInteractiveMarketplaceMapAndLocationPicker` exercises native Apple Maps panning, Search this area, the recenter control, and opening and dismissing the anchored location dropdown. It uses fixture inventory but live MapKit rendering; cloud query results and GPS movement require an authenticated session/device.
+
+`testInlineDiscoverySearchAndClear` verifies inline matching results, absent fake history, clearing, the empty-results state, and cancellation back to Discover. Pickup and connected-backend helpers now type directly into Discover rather than opening a search sheet.
+
+`testMapAddressSearchPinsSelection` uses live Apple Maps address search, selects a result, and checks that the manual-location pin appears. It requires network access to Apple Maps.
+
+## Cart confirmation — October 4, 2026
+
+Saved cloud carts are tested with two buyers adding the same listing without any reservation or draft run. Repeated adds keep one cart entry. Explicit plan confirmation creates a hold; a competing cart confirmation fails and rolls back its claims. The isolated backend suite also checks release, expiry, payment, and preservation through republishing. The core suite passed 36 tests with one opt-in test skipped; `testDiscoverToFourSellerPickupAndImpact` passed in Simulator with the Add to cart and Confirm & plan pickups flow. Logs: `/tmp/gusto-cart-core.log`, `/tmp/gusto-cart-backend.log`, `/tmp/gusto-cart-ui.log`.
+
+## Messages refresh — October 4, 2026
+
+`testGustoWelcomeMessage` passes opening the built-in platform note and returning to the inbox. `testChatComposerAndCorrectPinnedItem` passes opening a seller chat, preserving its listing context, sending a message, and receiving the fixture reply. Simulator logs: `/tmp/gusto-messages-ui.log` and `/tmp/gusto-messages-chat.log`.
+
+## Scan / inventory — October 4, 2026
+
+The core suite passes 39 tests (one opt-in test skipped), including private inventory save without publishing/reserving and item/device/time/range isolation for three-day storage summaries. The isolated backend suite passes private scan access, sensor sample validation, explicit seller attestations, publication with the scan photo, unlisting, deletion and non-destructive republish. `testScanSavesPrivateItemAndShowsSellReview` passes the camera tab, disconnected Bluetooth panel, private save and prefilled listing review; it uses an explicitly marked UI-test fixture instead of real camera capture. The iPhone Release build passes. Physical-device camera, Bluetooth pairing/firmware decoding, Gemini and calibrated expiry forecasting have not been validated. Logs: `/tmp/gusto-scan-core.log`, `/tmp/gusto-scan-backend.log`, `/tmp/gusto-scan-ui.log`, `/tmp/gusto-scan-device.log`.

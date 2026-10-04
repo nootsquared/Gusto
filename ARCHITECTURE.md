@@ -22,6 +22,7 @@ Filters are owned solely by `AppStore.filters`; the former `selectedPill` shortc
 ## Product invariants
 
 - A cart contains unique listing IDs; each listing represents one rescue package, not a quantity basket.
+- `addToCart` saves a package without an inventory hold, expiry timer, or seller contact. Cloud cart rows have an empty reservation ID until checkout. `confirmCartAndPlan` reserves the cart atomically and builds a draft pickup plan; unavailable inventory rolls back the entire confirmation. Seller contact begins only through the separate coordinate action. Existing confirmed holds keep their original expiry.
 - Money is integer cents throughout; convert only for display with `Money.text`.
 - `Totals` derives retail/pay/pounds/count from concrete listings.
 - Planning groups all items once per seller. It uses deterministic order/preferences and fixed fictional coordinates.
@@ -47,7 +48,7 @@ Fixture mode: `enroute` → `arrive` → `arrived` → `announceArrival` → `wa
 
 `DemoService.pause` provides a small asynchronous delay. Production demo defaults to 700ms; the UI-test launch argument reduces it to 50ms; core tests use zero. Coordination uses a generation token so stale responses from a discarded plan cannot confirm a new one. Reset changes the session generation so pending chat, freshness, arrival or payment responses cannot repopulate the reset session. Sending uses per-seller counters so overlapping messages keep typing status accurate. Async mutations remain main-actor isolated. Cancellation does not create a receipt. Receipt IDs are unique per transaction; payment deduplication uses the seller ID within the current run.
 
-Fixture mode is intentionally session-local: catalog changes, carts, plans, messages and receipts live in memory. Onboarding, map preference and smart-alert preference persist through AppStorage. Relaunch/reset restores the fixture catalog. No personal location or camera permission is requested.
+Fixture mode is intentionally session-local: catalog changes, carts, plans, messages and receipts live in memory. Onboarding, map preference and smart-alert preference persist through AppStorage. Relaunch/reset restores the fixture catalog. Fixture tests do not trigger location prompts. Camera permission is not requested.
 
 ## Mock boundaries and future integration points
 
@@ -123,3 +124,36 @@ The owner-only cloud catalog seed uses the existing 200-record fixture generator
 leaves simulation disabled, and omits local account activity. Catalog rows and related seller,
 pickup, tag, and media-reference records live in Maincloud; sample image bytes remain bundled
 in the app. The API resolves `bundle:` media keys to native asset names.
+
+`Rescue/Features/WelcomeView.swift` owns welcome presentation; RootView supplies the
+existing OAuth action and session state. Debug `--welcome-preview` shows it without
+clearing Keychain; Get started dismisses that preview to the existing session.
+
+LocationController is a root-injected observable platform adapter for Core Location and
+MapKit place search. It requests When In Use access, updates at approximately 250m movement,
+reverse-geocodes the Discover label, and pauses GPS when the app leaves the foreground.
+Manual location selection stops GPS and persists on device; users can switch back at any time.
+AppStore recalculates listing distances with pure Haversine math whenever coordinates or
+seller data changes. Search sends the chosen coordinates to the existing backend contract.
+The cloud discovery index still covers the seeded Linden Park market; this change does not
+create national inventory or move the fictional seller locations.
+
+MarketplaceMapView owns viewport/search and card selection state. Its native MKMapView coordinator clusters seller annotations, retains camera position during updates, and follows LocationController selections. AppStore.loadMapArea pages cloud searches using viewport coordinates without changing Discover location or text-search state. Map filters use the viewport for distance; remaining marketplace filters still apply.
+
+DiscoverView owns transient search text, focus, and loading presentation. Its query/filter/location task cancels superseded searches and uses AppStore.searchBackend plus paginated searchResults. Listing details still use the single root sheet; search is no longer an AppSheet destination.
+
+Map dropdown search owns its query/focus and debounces LocationController.find. MKLocalSearch supplies the address/place matches; selected coordinates use the existing device persistence and browse-location propagation, without introducing a separate address database. A non-clustered BrowseMapAnnotation marks manual selections.
+
+The Messages tab uses a scrollable inbox with actual seller conversations and a bundled, read-only Gusto welcome note. The note is always available, including before a new account has conversations; opening it does not create a seller chat or send a backend message. Empty inboxes offer a direct link back to Discover. The tab does not show a fabricated unread count.
+
+Gusto consumer copy refers to pickup plans, pickup trips, and purchases. The existing internal `rescued` phase and Rescue module names remain stable for stored data and authentication compatibility; completion is presented as “Picked up” or “Pickups complete.”
+
+## Scan ownership and hardware boundary
+
+`FoodScanController` owns transient image review and on-device Vision classification. Camera and scan sheets use the root modal host. `AppStore.inventory` and `storageReadings` own product state, clear on account changes, and load through the authenticated repository. Private photos remain private until the atomic `inventory_publish` action creates the listing, pickup location/window, public media reference and seller attestations. `inventory_unlist` archives the linked listing and returns the item to the private collection; claimed/sold listings cannot be removed. Inventory reads and edits are scoped to `ctx.sender`'s registered account.
+
+`StorageSensorConnection` is a native CoreBluetooth adapter for discovery and pairing. No arbitrary BLE bytes become measurements; firmware decoding remains pending. `StorageSummary` rejects other items/devices, future timestamps, invalid units/ranges, samples before the scan and history older than three days. This is a simple sample mean, not an expiry predictor. No connected sensor means no active tracking; if recent recorded samples exist, they are labeled historical averages.
+
+Private cloud photo storage is a bounded prototype (50 items/account, JPEG <=65 KB). Inventory is fetched separately from bootstrap. Full-size object storage, Gemini variety/condition extraction, calibrated expiry forecasting and BLE characteristic ingestion remain unconfigured. Database table/index additions are deployed without deleting existing data.
+
+Browse-location headers show “Current location” for GPS and a compact area label for manual selections; the picker retains the full place name. Switching to GPS removes the persisted manual selection. A one-time migration removes the museum selection written by older Simulator address tests; current tests use isolated preferences.
