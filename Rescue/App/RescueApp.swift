@@ -36,31 +36,44 @@ struct RootView: View {
         @Bindable var router = router
         TabView(selection: $router.tab) {
             NavigationStack { DiscoverView() }.tabItem {
-                Label("Discover", systemImage: "safari").environment(\.symbolVariants, .none)
+                Label {
+                    Text("Discover")
+                } icon: {
+                    Image(uiImage: NavigationArtwork.tabIcon(.discover, selected: router.tab == .discover))
+                        .renderingMode(.original)
+                }
             }
             .tag(AppTab.discover)
             NavigationStack { MarketplaceMapView() }.tabItem {
-                Label("Map", systemImage: "map").environment(\.symbolVariants, .none)
+                Label {
+                    Text("Map")
+                } icon: {
+                    Image(uiImage: NavigationArtwork.tabIcon(.map, selected: router.tab == .map))
+                        .renderingMode(.original)
+                }
             }
             .tag(AppTab.map)
             NavigationStack { ScanView() }.tabItem {
                 Label {
                     Text("Scan")
                 } icon: {
-                    Image(uiImage: NavigationArtwork.sell).renderingMode(.original)
+                    Image(uiImage: NavigationArtwork.tabIcon(.scan, selected: router.tab == .scan)).renderingMode(.original)
                 }
             }.tag(AppTab.scan)
             NavigationStack { MessagesView() }.tabItem {
-                Label("Messages", systemImage: "bubble.left.and.bubble.right").environment(
-                    \.symbolVariants, .none)
+                Label {
+                    Text("Messages")
+                } icon: {
+                    Image(uiImage: NavigationArtwork.tabIcon(.messages, selected: router.tab == .messages))
+                        .renderingMode(.original)
+                }
             }.tag(AppTab.messages)
             NavigationStack { ProfileView() }.tabItem {
                 Label {
                     Text("You")
                 } icon: {
                     Image(
-                        uiImage: router.tab == .you
-                            ? NavigationArtwork.selectedProfile : NavigationArtwork.profile
+                        uiImage: NavigationArtwork.tabIcon(.profile, selected: router.tab == .you)
                     )
                     .renderingMode(.original)
                 }

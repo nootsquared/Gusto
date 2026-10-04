@@ -24,14 +24,14 @@ enum Theme {
             appearance.compactInlineLayoutAppearance,
         ] {
             layout.normal.iconColor = UIColor(named: "Ink2")
-            layout.selected.iconColor = UIColor(named: "Ink")
+            layout.selected.iconColor = UIColor(named: "Save")
             layout.normal.titleTextAttributes = [
                 .foregroundColor: UIColor(named: "Ink2") ?? .secondaryLabel,
                 .font: UIFont.systemFont(ofSize: 11, weight: .medium),
             ]
             layout.selected.titleTextAttributes = [
-                .foregroundColor: UIColor(named: "Ink") ?? .label,
-                .font: UIFont.systemFont(ofSize: 11, weight: .semibold),
+                .foregroundColor: UIColor(named: "Save") ?? .label,
+                .font: UIFont.systemFont(ofSize: 11, weight: .bold),
             ]
             layout.normal.badgeBackgroundColor = UIColor(named: "Apricot")
             layout.selected.badgeBackgroundColor = UIColor(named: "Apricot")
@@ -76,55 +76,85 @@ enum Haptic {
     static func success() { UINotificationFeedbackGenerator().notificationOccurred(.success) }
 }
 
-// TabView extracts tab images; render the crop/background into the image itself.
+// Render custom artwork into tab images so native TabView preserves its styling.
 enum NavigationArtwork {
-    static let profile = profileImage(selected: false)
-    static let selectedProfile = profileImage(selected: true)
-    static let sell: UIImage = {
-        let size = CGSize(width: 30, height: 30)
-        return UIGraphicsImageRenderer(size: size).image { context in
-            let circle = CGRect(origin: .zero, size: size).insetBy(dx: 1, dy: 1)
-            (UIColor(named: "SageSoft") ?? .systemGray6).setFill()
-            context.cgContext.fillEllipse(in: circle)
-            (UIColor(named: "SageDeep") ?? .darkGray).setStroke()
-            context.cgContext.setLineWidth(1.8)
-            context.cgContext.strokeEllipse(in: circle)
-            let plus = UIImage(
-                systemName: "plus",
-                withConfiguration:
-                    UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold))?
-                .withTintColor(
-                    UIColor(named: "SageDeep") ?? .darkGray, renderingMode: .alwaysOriginal)
-            if let plus {
-                plus.draw(
-                    in: CGRect(
-                        x: (30 - plus.size.width) / 2,
-                        y: (30 - plus.size.height) / 2,
-                        width: plus.size.width, height: plus.size.height))
-            }
-        }.withRenderingMode(.alwaysOriginal)
-    }()
+    enum Icon { case discover, map, scan, messages, profile }
 
-    private static func profileImage(selected: Bool) -> UIImage {
-        let size = CGSize(width: 30, height: 30)
-        return UIGraphicsImageRenderer(size: size).image { context in
-            let bounds = CGRect(origin: .zero, size: size).insetBy(dx: 2, dy: 2)
-            context.cgContext.saveGState()
-            context.cgContext.addEllipse(in: bounds)
-            context.cgContext.clip()
-            if let photo = UIImage(named: "profile") {
-                let scale = max(bounds.width / photo.size.width, bounds.height / photo.size.height)
-                let width = photo.size.width * scale
-                let height = photo.size.height * scale
-                photo.draw(
-                    in: CGRect(
-                        x: bounds.midX - width / 2, y: bounds.midY - height / 2,
-                        width: width, height: height))
+    static func tabIcon(_ icon: Icon, selected: Bool) -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: 32, height: 32)).image { renderer in
+            let context = renderer.cgContext
+            if selected {
+                (UIColor(named: "Save") ?? .systemGreen).setFill()
+                UIBezierPath(roundedRect: CGRect(x: 10, y: 29, width: 12, height: 2),
+                             cornerRadius: 1).fill()
             }
-            context.cgContext.restoreGState()
-            (UIColor(named: selected ? "SageDeep" : "Line") ?? .gray).setStroke()
-            context.cgContext.setLineWidth(selected ? 2 : 1)
-            context.cgContext.strokeEllipse(in: bounds)
+            (UIColor(named: selected ? "Save" : "Ink2") ?? .darkGray).setStroke()
+            context.setLineWidth(selected ? 1.9 : 1.65)
+            context.setLineCap(.round)
+            context.setLineJoin(.round)
+
+            func stroke(_ path: UIBezierPath) {
+                context.addPath(path.cgPath)
+                context.strokePath()
+            }
+            func line(_ points: [CGPoint]) {
+                let path = UIBezierPath()
+                if let first = points.first { path.move(to: first) }
+                for point in points.dropFirst() { path.addLine(to: point) }
+                stroke(path)
+            }
+
+            switch icon {
+            case .discover:
+                for (x, y) in [(7.0, 7.0), (18.0, 7.0), (7.0, 18.0), (18.0, 18.0)] {
+                    stroke(UIBezierPath(roundedRect: CGRect(x: x, y: y, width: 7, height: 7),
+                                        cornerRadius: 2.5))
+                }
+            case .map:
+                let path = UIBezierPath()
+                path.move(to: CGPoint(x: 16, y: 26))
+                path.addCurve(to: CGPoint(x: 8, y: 14),
+                              controlPoint1: CGPoint(x: 12, y: 22),
+                              controlPoint2: CGPoint(x: 8, y: 18))
+                path.addArc(withCenter: CGPoint(x: 16, y: 14), radius: 8,
+                            startAngle: .pi, endAngle: 0, clockwise: true)
+                path.addCurve(to: CGPoint(x: 16, y: 26),
+                              controlPoint1: CGPoint(x: 24, y: 18),
+                              controlPoint2: CGPoint(x: 20, y: 22))
+                stroke(path)
+                stroke(UIBezierPath(ovalIn: CGRect(x: 13, y: 11, width: 6, height: 6)))
+            case .scan:
+                stroke(UIBezierPath(roundedRect: CGRect(x: 5, y: 10, width: 22, height: 15), cornerRadius: 4))
+                stroke(UIBezierPath(ovalIn: CGRect(x: 12, y: 13, width: 8, height: 8)))
+                line([CGPoint(x: 11, y: 10), CGPoint(x: 13, y: 7), CGPoint(x: 19, y: 7), CGPoint(x: 21, y: 10)])
+            case .messages:
+                let path = UIBezierPath()
+                path.move(to: CGPoint(x: 11, y: 23))
+                path.addLine(to: CGPoint(x: 7, y: 26))
+                path.addLine(to: CGPoint(x: 7, y: 12))
+                path.addQuadCurve(to: CGPoint(x: 12, y: 7),
+                                  controlPoint: CGPoint(x: 7, y: 7))
+                path.addLine(to: CGPoint(x: 21, y: 7))
+                path.addQuadCurve(to: CGPoint(x: 26, y: 12),
+                                  controlPoint: CGPoint(x: 26, y: 7))
+                path.addLine(to: CGPoint(x: 26, y: 18))
+                path.addQuadCurve(to: CGPoint(x: 21, y: 23),
+                                  controlPoint: CGPoint(x: 26, y: 23))
+                path.close()
+                stroke(path)
+                line([CGPoint(x: 12, y: 13), CGPoint(x: 21, y: 13)])
+                line([CGPoint(x: 12, y: 17), CGPoint(x: 18, y: 17)])
+            case .profile:
+                stroke(UIBezierPath(ovalIn: CGRect(x: 12, y: 6, width: 8, height: 8)))
+                let path = UIBezierPath()
+                path.move(to: CGPoint(x: 7, y: 26))
+                path.addLine(to: CGPoint(x: 7, y: 24))
+                path.addCurve(to: CGPoint(x: 25, y: 24),
+                              controlPoint1: CGPoint(x: 7, y: 14),
+                              controlPoint2: CGPoint(x: 25, y: 14))
+                path.addLine(to: CGPoint(x: 25, y: 26))
+                stroke(path)
+            }
         }.withRenderingMode(.alwaysOriginal)
     }
 }
