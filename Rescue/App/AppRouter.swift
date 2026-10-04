@@ -7,7 +7,7 @@ enum ProfilePanel: String {
 }
 enum AppSheet {
     case listing(String)
-    case cart, search, filters
+    case cart, filters
     case collection(String, [String])
     case chat(String)
     case run

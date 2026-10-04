@@ -299,8 +299,10 @@ struct PickupFlowView: View {
                                 FoodPhoto(name: item.image).frame(height: 175).clipShape(
                                     RoundedRectangle(cornerRadius: 16))
                                 Text(item.name).rescueFont(16, .semibold)
-                                Text("Listed · \(item.updated) · inspect the item at pickup")
-                                    .rescueFont(12).foregroundStyle(Theme.secondary)
+                                Text(
+                                    "Listed · \(ListingTimestamp.display(item.updated)) · inspect the item at pickup"
+                                )
+                                .rescueFont(12).foregroundStyle(Theme.secondary)
                             }
                         }
                         Text("Demo reference photo. This is not a newly captured pickup photo.")

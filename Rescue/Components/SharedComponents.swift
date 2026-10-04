@@ -1,5 +1,30 @@
 import SwiftUI
 
+enum ListingTimestamp {
+    static func display(_ value: String, now: Date = .now) -> String {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var date = iso.date(from: value)
+        if date == nil {
+            iso.formatOptions = [.withInternetDateTime]
+            date = iso.date(from: value)
+        }
+        if let date {
+            if abs(now.timeIntervalSince(date)) < 60 { return "Just now" }
+            let relative = RelativeDateTimeFormatter()
+            relative.unitsStyle = .full
+            return relative.localizedString(for: date, relativeTo: now)
+        }
+        // Local fixtures already contain relative labels; never expose an unknown raw value.
+        if value == "just now" { return "Just now" }
+        if value == "yesterday" { return "Yesterday" }
+        if value.range(of: #"^\d+[mh] ago$"#, options: .regularExpression) != nil {
+            return value
+        }
+        return "Date unavailable"
+    }
+}
+
 struct FoodPhoto: View {
     let name: String
     @State private var remoteImage: UIImage?
@@ -172,12 +197,52 @@ struct AddButton: View {
     }
 }
 
+/// The original price anchors the savings to retail, rather than suggesting a second discount.
+struct ListingOffer: View {
+    let item: Listing
+    var priceSize: CGFloat = 17
+
+    private var savings: some View {
+        Text("\(item.discount)% less").rescueFont(12, .semibold).foregroundStyle(Theme.save)
+    }
+    private var distance: some View {
+        Text("\(item.distance, specifier: "%.1f") mi")
+            .rescueFont(12, .medium).foregroundStyle(Theme.secondary)
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Text(Money.text(item.price)).rescueFont(priceSize, .bold).foregroundStyle(Theme.ink)
+                if item.retail > item.price {
+                    Text(Money.text(item.retail)).strikethrough()
+                        .rescueFont(12, .medium).foregroundStyle(Theme.muted)
+                }
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    if item.retail > item.price {
+                        savings
+                        Text("·").rescueFont(12).foregroundStyle(Theme.muted)
+                    }
+                    distance
+                }.fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 2) {
+                    if item.retail > item.price { savings }
+                    distance
+                }
+            }
+        }.monospacedDigit()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Price \(Money.text(item.price)), retail \(Money.text(item.retail)), \(item.discount) percent below retail, \(String(format: "%.1f", item.distance)) miles away")
+    }
+}
+
 struct ListingTile: View {
     @Environment(AppRouter.self) private var router
     let item: Listing
     var width: CGFloat = 164
-    var badge: String? = nil
-    var urgency = false
+    var isDeal = false
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             Button {
@@ -189,23 +254,19 @@ struct ListingTile: View {
                 .accessibilityIdentifier("listing-\(item.id)")
                 .overlay(alignment: .bottomTrailing) { AddButton(item: item).padding(2) }
                 .overlay(alignment: .topLeading) {
-                    if let badge {
-                        Text(badge).rescueFont(11, .semibold).foregroundStyle(Theme.paper).padding(
-                            .horizontal, 7
-                        ).padding(.vertical, 4).background(
-                            urgency ? Theme.apricot : Theme.save, in: Capsule()
-                        ).padding(8)
+                    if isDeal {
+                        Image(systemName: "tag.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.save)
+                            .frame(width: 30, height: 30)
+                            .background(Theme.paper.opacity(0.96), in: Circle())
+                            .shadow(color: Theme.deep.opacity(0.08), radius: 4, y: 2)
+                            .padding(8)
+                            .accessibilityLabel("Good deal")
                     }
                 }
             Text(item.name).rescueFont(15, .semibold).lineLimit(1)
-            HStack(spacing: 5) {
-                Text(Money.text(item.price)).rescueFont(17, .bold)
-                Text("\(item.discount)% off").rescueFont(13, .semibold).foregroundStyle(Theme.save)
-                Spacer(minLength: 0)
-                Text("\(item.distance, specifier: "%.1f") mi").rescueFont(13, .medium)
-                    .foregroundStyle(
-                        Theme.secondary)
-            }.monospacedDigit().lineLimit(1).minimumScaleFactor(0.9)
+            ListingOffer(item: item)
         }.frame(width: width)
     }
 }
@@ -225,12 +286,7 @@ struct ListingRow: View {
                         RoundedRectangle(cornerRadius: 14))
                     VStack(alignment: .leading, spacing: 4) {
                         Text(item.name).rescueFont(15, .semibold).lineLimit(1)
-                        HStack(spacing: 6) {
-                            Text(Money.text(item.price)).rescueFont(15, .semibold)
-                            Text("\(item.discount)% off").foregroundStyle(Theme.save)
-                            Text("· \(item.distance, specifier: "%.1f") mi").foregroundStyle(
-                                Theme.muted)
-                        }.rescueFont(12).monospacedDigit()
+                        ListingOffer(item: item, priceSize: 15)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }.foregroundStyle(Theme.ink).contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityIdentifier("\(identifierPrefix)-\(item.id)")

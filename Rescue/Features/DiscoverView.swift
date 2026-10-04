@@ -22,10 +22,40 @@ struct CartButton: View {
 struct DiscoverView: View {
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
+    @State private var searchText = ""
+    @State private var searchLoading = false
+    @State private var completedSearch = ""
+    @State private var searchRequest = UUID()
+    @FocusState private var searchFocused: Bool
+    private var trimmedSearch: String { searchText.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var searchActive: Bool { searchFocused || !trimmedSearch.isEmpty }
+    private var searchResults: [Listing] {
+        if store.isBackend && completedSearch != trimmedSearch { return [] }
+        return store.visibleListings(query: trimmedSearch)
+    }
+    private struct SearchContext: Equatable {
+        let query: String
+        let filters: Filters
+    }
     private var feed: [Listing] { store.visibleListings(query: "") }
     private var picked: [Listing] {
         return store.personalizedListings.filter {
             store.filters.accepts($0, sellers: store.sellers)
+        }
+    }
+    private var firstName: String? {
+        let name = store.profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty,
+            !["Sign in to Gusto", "Sign in to Rescue", "Rescue member", "Gusto member"].contains(
+                name)
+        else { return nil }
+        return name.split(whereSeparator: { $0.isWhitespace }).first.map(String.init)
+    }
+    private func greeting(at date: Date) -> String {
+        switch Calendar.autoupdatingCurrent.component(.hour, from: date) {
+        case 5..<12: return "Good morning"
+        case 12..<17: return "Good afternoon"
+        default: return "Good evening"
         }
     }
     var body: some View {
@@ -42,28 +72,49 @@ struct DiscoverView: View {
                         Spacer()
                         CartButton()
                     }
-                    HStack(spacing: 8) {
-                        Button {
-                            router.sheet = .search
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "magnifyingglass")
-                                Text("What are you looking for?").rescueFont(17)
-                                Spacer(minLength: 0)
+                    HStack(spacing: 10) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(Theme.save).frame(width: 32, height: 32)
+                                .background(Theme.soft, in: Circle())
+                            TextField("Search food nearby", text: $searchText)
+                                .rescueFont(16).focused($searchFocused)
+                                .autocorrectionDisabled().textInputAutocapitalization(.never)
+                                .submitLabel(.search).onSubmit { searchFocused = false }
+                                .accessibilityIdentifier("search-input")
+                            if !searchText.isEmpty {
+                                Button {
+                                    searchText = ""
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 17)).foregroundStyle(Theme.muted)
+                                        .frame(width: 28, height: 36)
+                                }.buttonStyle(.plain).accessibilityLabel("Clear search")
                             }
-                            .foregroundStyle(Theme.muted).padding(.horizontal, 16).frame(height: 54)
-                            .card(radius: 18)
-                        }.buttonStyle(.plain).accessibilityIdentifier("search")
+                        }.padding(.horizontal, 12).frame(height: 58)
+                            .background(Theme.paper, in: RoundedRectangle(cornerRadius: 20))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .stroke(
+                                        searchActive ? Theme.save.opacity(0.5) : Theme.line,
+                                        lineWidth: 1)
+                            )
+                            .shadow(
+                                color: Theme.deep.opacity(searchActive ? 0.07 : 0.03), radius: 12,
+                                y: 4)
                         Button {
                             router.sheet = .filters
                         } label: {
-                            Image(systemName: "slider.horizontal.3").frame(width: 54, height: 54)
-                                .card(radius: 18)
+                            Image(systemName: "slider.horizontal.3").frame(width: 52, height: 58)
+                                .card(radius: 20)
                         }
                         .buttonStyle(.plain).accessibilityLabel("Filters")
                     }
                 }.padding(.horizontal, 20).padding(.top, 12)
-                if store.isBackend && store.catalog.isEmpty {
+                if searchActive {
+                    searchContent
+                } else if store.isBackend && store.catalog.isEmpty {
                     EmptyState(
                         title: store.online ? "No listings yet" : "Unable to load listings",
                         message: store.online
@@ -76,7 +127,7 @@ struct DiscoverView: View {
                     }
                 } else {
                     FeedSection(
-                        title: "Picked for you", subtitle: "Based on what you rescue", items: picked
+                        title: "Picked for you", subtitle: "Based on what you like", items: picked
                     ) { rail(picked) }
                     FeedSection(
                         title: "Buy again",
@@ -101,11 +152,13 @@ struct DiscoverView: View {
                                                 Text(
                                                     item.name.replacingOccurrences(
                                                         of: "Organic ", with: ""
-                                                    ).replacingOccurrences(of: "Unopened ", with: "")
-                                                        .replacingOccurrences(of: "Ripe ", with: "")
+                                                    ).replacingOccurrences(
+                                                        of: "Unopened ", with: ""
+                                                    )
+                                                    .replacingOccurrences(of: "Ripe ", with: "")
                                                 ).rescueFont(16, .semibold).lineLimit(1)
                                                 if store.cart.contains(item.id) {
-                                                    Label("Reserved", systemImage: "checkmark")
+                                                    Label("In cart", systemImage: "checkmark")
                                                         .rescueFont(14, .medium).foregroundStyle(
                                                             Theme.save)
                                                 } else {
@@ -114,9 +167,11 @@ struct DiscoverView: View {
                                                             15, .bold
                                                         )
                                                         .foregroundStyle(Theme.ink)
-                                                        Text("\(item.distance, specifier: "%.1f") mi")
-                                                            .rescueFont(13, .medium)
-                                                            .foregroundStyle(Theme.secondary)
+                                                        Text(
+                                                            "\(item.distance, specifier: "%.1f") mi"
+                                                        )
+                                                        .rescueFont(13, .medium)
+                                                        .foregroundStyle(Theme.secondary)
                                                     }.lineLimit(1).monospacedDigit()
                                                 }
                                             }
@@ -132,7 +187,8 @@ struct DiscoverView: View {
                         }
                     }
                     FeedSection(
-                        title: "Just listed near you", items: feed.sorted { $0.distance < $1.distance }
+                        title: "Just listed near you",
+                        items: feed.sorted { $0.distance < $1.distance }
                     ) {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(alignment: .top, spacing: 24) {
@@ -140,28 +196,21 @@ struct DiscoverView: View {
                                     feed.filter { $0.distance <= 0.7 }.sorted {
                                         $0.distance < $1.distance
                                     }.prefix(9))
-                                ForEach(Array(stride(from: 0, to: nearby.count, by: 3)), id: \.self) {
+                                ForEach(Array(stride(from: 0, to: nearby.count, by: 3)), id: \.self)
+                                {
                                     start in
                                     VStack(spacing: 0) {
-                                        ForEach(Array(nearby[start..<min(start + 3, nearby.count)])) {
+                                        ForEach(Array(nearby[start..<min(start + 3, nearby.count)]))
+                                        {
                                             item in
                                             ListingRow(item: item)
-                                            if item.id != nearby[min(start + 2, nearby.count - 1)].id {
+                                            if item.id
+                                                != nearby[min(start + 2, nearby.count - 1)].id
+                                            {
                                                 Divider().overlay(Theme.line)
                                             }
                                         }
                                     }.frame(width: 315)
-                                }
-                            }.padding(.horizontal, 20)
-                        }
-                    }
-                    FeedSection(
-                        title: "Dinner tonight", items: feed.filter { $0.category == "Prepared" }
-                    ) {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 20) {
-                                ForEach(feed.filter { $0.category == "Prepared" }) { item in
-                                    MealCard(item: item)
                                 }
                             }.padding(.horizontal, 20)
                         }
@@ -177,48 +226,161 @@ struct DiscoverView: View {
                                 $0.category == "Snacks" || ["bana", "cereal"].contains($0.id)
                             }, width: 164)
                     }
-                    FeedSection(title: "Ending soon", items: feed.filter { $0.freshness == .useSoon }) {
-                        rail(feed.filter { $0.freshness == .useSoon }, width: 164, urgency: true)
-                    }
                     FeedSection(
-                        title: "Best deals near you", items: feed.sorted { $0.discount > $1.discount }
+                        title: "Best deals near you",
+                        items: feed.sorted { $0.discount > $1.discount }
                     ) {
                         rail(
                             Array(feed.sorted { $0.discount > $1.discount }.prefix(6)), width: 164,
                             deal: true)
                     }
                 }
-                if store.isBackend {
-                    if !store.feedCursor.isEmpty {
-                        Button("Load more food") { Task { await store.loadNextPage() } }.padding()
-                            .accessibilityIdentifier("load-more-food")
-                    }
-                    Text(store.online ? "Connected" : "Offline · cached browsing").font(
-                        .caption
-                    ).padding(.horizontal, 20)
+                if !searchActive && store.isBackend && !store.feedCursor.isEmpty {
+                    Color.clear.frame(height: 1)
+                        .task(id: store.feedCursor) { await store.loadNextPage() }
+                        .accessibilityHidden(true)
                 }
-                Text("Better prices. Less waste. One trip.").rescueFont(13).foregroundStyle(
-                    Theme.muted
-                ).frame(maxWidth: .infinity).padding(.top, 40).padding(.bottom, 32)
-            }
-        }.refreshable {
-            await store.refreshBackend(force: true)
-            await store.loadNextPage(first: true)
-        }.background(Theme.ivory).foregroundStyle(Theme.ink).toolbar(.hidden, for: .navigationBar)
+            }.padding(.bottom, 24)
+        }.scrollDismissesKeyboard(.interactively)
+            .animation(Theme.spring, value: searchActive)
+            .task(
+                id: SearchContext(
+                    query: trimmedSearch, filters: store.filters)
+            ) {
+                let request = UUID()
+                searchRequest = request
+                guard !trimmedSearch.isEmpty else {
+                    searchLoading = false
+                    completedSearch = ""
+                    return
+                }
+                let query = trimmedSearch
+                searchLoading = store.isBackend
+                await store.searchBackend(query)
+                guard !Task.isCancelled, searchRequest == request else { return }
+                completedSearch = query
+                searchLoading = false
+            }.refreshable {
+                if !trimmedSearch.isEmpty {
+                    await store.searchBackend(trimmedSearch)
+                } else {
+                    await store.refreshBackend(force: true)
+                    await store.loadNextPage(first: true)
+                }
+            }.background(Theme.ivory).foregroundStyle(Theme.ink).toolbar(
+                .hidden, for: .navigationBar)
     }
+    private var searchContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text(
+                    trimmedSearch.isEmpty
+                        ? "Browse by category"
+                        : searchLoading ? "Searching…" : "\(searchResults.count) nearby"
+                )
+                .rescueFont(20, .semibold)
+                Spacer()
+                Button("Cancel") {
+                    searchFocused = false
+                    searchText = ""
+                }.rescueFont(14, .semibold).foregroundStyle(Theme.save)
+                    .accessibilityIdentifier("cancel-search")
+            }
+            if trimmedSearch.isEmpty {
+                let categories = Array(Set(feed.map(\.category))).sorted()
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                    ForEach(categories, id: \.self) { category in
+                        Button {
+                            searchText = category
+                        } label: {
+                            HStack {
+                                Text(category).rescueFont(15, .semibold)
+                                Spacer()
+                                Image(systemName: "arrow.up.right")
+                                    .font(.system(size: 12, weight: .medium))
+                            }.foregroundStyle(Theme.deep).padding(16)
+                                .background(
+                                    Theme.soft.opacity(0.65), in: RoundedRectangle(cornerRadius: 18)
+                                )
+                        }.buttonStyle(.plain)
+                    }
+                }
+            } else if searchLoading {
+                HStack(spacing: 10) {
+                    ProgressView().tint(Theme.save)
+                    Text("Looking for matches nearby").rescueFont(14).foregroundStyle(
+                        Theme.secondary)
+                }.padding(.vertical, 24)
+            } else if searchResults.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 28, weight: .light))
+                        .foregroundStyle(Theme.save).padding(.bottom, 6)
+                    Text(
+                        store.isBackend && !store.online
+                            ? "Couldn't load results" : "No matches nearby"
+                    )
+                    .rescueFont(22, .semibold)
+                    Text(
+                        store.isBackend && !store.online
+                            ? "Check your connection and try again."
+                            : "Try a different food or widen your filters."
+                    )
+                    .rescueFont(15).foregroundStyle(Theme.secondary)
+                    Button("Adjust filters") { router.sheet = .filters }
+                        .rescueFont(14, .semibold).foregroundStyle(Theme.save).padding(.top, 4)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(24).card(radius: 24)
+            } else {
+                LazyVStack(spacing: 12) {
+                    ForEach(searchResults) { item in
+                        DiscoverSearchCard(item: item)
+                    }
+                    if store.isBackend && !store.searchCursor.isEmpty {
+                        ProgressView().tint(Theme.save).padding(12)
+                            .task(id: store.searchCursor) { await store.loadSearchPage() }
+                    }
+                }.accessibilityIdentifier("search-results")
+            }
+        }.padding(.horizontal, 20).padding(.top, 28)
+    }
+
     private func rail(
-        _ items: [Listing], width: CGFloat = 164, urgency: Bool = false, deal: Bool = false
+        _ items: [Listing], width: CGFloat = 164, deal: Bool = false
     ) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(alignment: .top, spacing: 20) {
                 ForEach(items) { item in
                     ListingTile(
                         item: item, width: width,
-                        badge: urgency ? item.pickup : deal ? "−\(item.discount)%" : nil,
-                        urgency: urgency)
+                        isDeal: deal)
                 }
             }.padding(.horizontal, 20)
         }
+    }
+}
+
+private struct DiscoverSearchCard: View {
+    @Environment(AppRouter.self) private var router
+    let item: Listing
+    var body: some View {
+        HStack(spacing: 12) {
+            Button {
+                router.sheet = .listing(item.id)
+            } label: {
+                HStack(spacing: 14) {
+                    FoodPhoto(name: item.image).frame(width: 76, height: 86)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(item.name).rescueFont(16, .semibold).lineLimit(2)
+                        ListingOffer(item: item, priceSize: 18)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }.foregroundStyle(Theme.ink).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityIdentifier("result-\(item.id)")
+            AddButton(item: item)
+        }.padding(12).background(Theme.paper, in: RoundedRectangle(cornerRadius: 22))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22).stroke(Theme.line.opacity(0.7), lineWidth: 1)
+            )
+            .shadow(color: Theme.deep.opacity(0.035), radius: 10, y: 4)
     }
 }
 

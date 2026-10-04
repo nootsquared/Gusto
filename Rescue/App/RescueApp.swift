@@ -201,7 +201,6 @@ struct SheetHost: View {
                 switch router.sheet {
                 case .listing(let id): ListingDetailView(id: id)
                 case .cart: CartView()
-                case .search: SearchView()
                 case .filters: FiltersView()
                 case .collection(let title, let ids): CollectionView(title: title, ids: ids)
                 case .chat(let seller): ChatView(sellerID: seller)

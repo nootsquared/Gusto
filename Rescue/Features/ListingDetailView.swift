@@ -13,11 +13,8 @@ struct ListingDetailView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     FoodPhoto(name: item.image).frame(height: expanded ? 300 : 230)
                         .overlay(alignment: .topLeading) {
-                            HStack(spacing: 5) {
-                                FreshnessBadge(freshness: item.freshness, solid: true)
-                                Text("Fresh check · \(item.updated)").rescueFont(12, .semibold)
-                                    .padding(6).background(Theme.paper.opacity(0.95), in: Capsule())
-                            }.padding(16)
+                            FreshnessBadge(freshness: item.freshness, solid: true)
+                                .padding(.leading, 16).padding(.trailing, 72).padding(.top, 16)
                         }
                         .overlay(alignment: .topTrailing) {
                             Button {
@@ -151,10 +148,9 @@ struct ListingDetailView: View {
                 Image(systemName: item.stale ? "exclamationmark.circle" : "checkmark.shield")
                     .foregroundStyle(item.stale ? Theme.apricot : Theme.sage)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(
-                        item.updated == "just now"
-                            ? "Updated just now · Still good" : "Photo updated \(item.updated)"
-                    ).rescueFont(14, .semibold)
+                    Text("Photo updated").rescueFont(14, .semibold)
+                    Text(ListingTimestamp.display(item.updated))
+                        .rescueFont(13).foregroundStyle(Theme.secondary)
                     Text(item.stale ? "Want a current look?" : "Seller reconfirmed condition")
                         .rescueFont(13).foregroundStyle(Theme.secondary)
                 }
