@@ -112,7 +112,7 @@ struct ListingDetailView: View {
                                 "Freshness is seller-reported and photo-assisted. Always use your judgment at pickup."
                             ).rescueFont(12).foregroundStyle(Theme.muted)
                             Label(
-                                "Keeps \(String(format: "%.1f", item.weight)) lb of food in use. \(seller.firstName) has rescued \(seller.pickups) items.",
+                                "Keeps \(String(format: "%.1f", item.weight)) lb of food in use. \(seller.firstName) has shared \(seller.pickups) items.",
                                 systemImage: "leaf"
                             ).rescueFont(14).padding(16).background(
                                 Theme.butterSoft, in: RoundedRectangle(cornerRadius: 18))

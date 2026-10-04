@@ -562,7 +562,7 @@ extension AppStore {
         feedLoading = false
         searchGeneration = UUID()
         lastRefresh = .distantPast
-        profileName = "Sign in to Rescue"
+        profileName = "Sign in to Gusto"
     }
     public func enterBackendMode() {
         // First launch without a provisioned session must never display fixture product data.

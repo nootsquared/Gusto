@@ -23,6 +23,7 @@ struct RootView: View {
     @Environment(AppRouter.self) private var router
     @AppStorage("hasOnboarded") private var hasOnboarded = false
     @State private var showFinale = false
+    @State private var welcomePreviewDismissed = false
     @Environment(\.scenePhase) private var scenePhase
     @State private var showOnboarding = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -97,28 +98,19 @@ struct RootView: View {
             if store.isBackend && !SessionController.shared.isLocalBackend
                 && SessionController.shared.current == nil
             {
-                VStack(spacing: 20) {
-                    Image(systemName: "leaf.fill").font(.system(size: 48)).foregroundStyle(Theme.save)
-                    Text("Welcome to Rescue").rescueFont(28, .bold)
-                    Text("Sign in to rescue food, message sellers, and keep your impact.")
-                        .rescueFont(16).multilineTextAlignment(.center)
-                    Button {
-                        Task { await SessionController.shared.signIn() }
-                    } label: {
-                        HStack {
-                            if SessionController.shared.signingIn { ProgressView() }
-                            Text(SessionController.shared.signingIn ? "Signing in…" : "Sign in with Google")
-                        }.frame(maxWidth: .infinity).padding()
-                    }.buttonStyle(.borderedProminent).tint(Theme.save)
-                        .disabled(SessionController.shared.signingIn)
-                        .accessibilityIdentifier("google-sign-in")
-                    if let error = SessionController.shared.authError {
-                        Text(error).rescueFont(14).foregroundStyle(Theme.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Theme.ivory.ignoresSafeArea())
+                WelcomeView(
+                    signingIn: SessionController.shared.signingIn,
+                    error: SessionController.shared.authError
+                ) {
+                    Task { await SessionController.shared.signIn() }
+                }
             }
+        }.overlay {
+            #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("--welcome-preview") && !welcomePreviewDismissed {
+                    WelcomeView { welcomePreviewDismissed = true }
+                }
+            #endif
         }.task(id: "\(scenePhase)-\(store.isBackend)-\(store.accountID)") {
             if scenePhase == .active { await store.pollBackend() }
         }.tint(Theme.ink).background(Theme.ivory.ignoresSafeArea())
@@ -258,7 +250,7 @@ struct OnboardingView: View {
                     ).frame(height: 110)
                 }.frame(height: geometry.size.height * 0.43).clipped()
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("rescue").rescueFont(15, .semibold).foregroundStyle(Theme.sage)
+                    Text("Gusto").rescueFont(15, .semibold).foregroundStyle(Theme.sage)
                     Text("Good food near you, for less, before it goes to waste.").rescueFont(
                         36, .bold
                     ).minimumScaleFactor(0.7)

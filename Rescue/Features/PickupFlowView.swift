@@ -12,7 +12,7 @@ struct SavingsHero: View {
                 Spacer()
                 metric("You pay", Money.text(totals.pay))
                 Spacer()
-                metric("Rescued", String(format: "%.1f lb", totals.pounds))
+                metric("Food saved", String(format: "%.1f lb", totals.pounds))
             }
         }.padding(20).foregroundStyle(Theme.paper).background(
             Theme.deep, in: RoundedRectangle(cornerRadius: 24))
@@ -108,7 +108,7 @@ struct PickupFlowView: View {
             } else {
                 handoffView
             }
-        }.navigationTitle(store.phase == .idle ? "Smart pickup plan" : "Rescue run")
+        }.navigationTitle(store.phase == .idle ? "Pickup plan" : "Pickup trip")
             .navigationBarTitleDisplayMode(.inline)
     }
     private var planView: some View {
@@ -123,9 +123,9 @@ struct PickupFlowView: View {
                     ).foregroundStyle(Theme.sage)
                     Text(
                         mode == .fastest
-                            ? "Your fastest rescue run"
+                            ? "Your fastest pickup route"
                             : mode == .shortest
-                                ? "Your shortest rescue run" : "Your best-timed rescue run"
+                                ? "Your shortest pickup route" : "Your best pickup times"
                     ).rescueFont(26, .semibold)
                     Text(
                         "\(plan.stops.count) stops · \(plan.elapsed) min · \(String(format: "%.1f", plan.distance)) mi"
@@ -162,7 +162,7 @@ struct PickupFlowView: View {
                         MetricCard(
                             value: Money.text(plan.totals.saved), label: "saved", color: Theme.save)
                         MetricCard(
-                            value: String(format: "%.1f lb", plan.totals.pounds), label: "rescued")
+                            value: String(format: "%.1f lb", plan.totals.pounds), label: "food saved")
                     }
                     Text("Demo estimates · fixed pickup area").rescueFont(12).foregroundStyle(
                         Theme.muted)
@@ -176,7 +176,7 @@ struct PickupFlowView: View {
             BottomAction {
                 if store.plan?.allConfirmed == true {
                     PrimaryButton(
-                        title: "Start rescue run", symbol: "location.fill", color: Theme.deep,
+                        title: "Start pickups", symbol: "location.fill", color: Theme.deep,
                         id: "start-run"
                     ) {
                         if store.startRun() {
@@ -210,7 +210,7 @@ struct PickupFlowView: View {
                 RescueMap(items: [], stops: store.plan?.stops ?? [], selectedID: $pin).frame(
                     height: 200
                 ).clipShape(RoundedRectangle(cornerRadius: 24))
-                Text("Rescue run · stop \(store.stopIndex + 1) of \(store.plan?.stops.count ?? 0)")
+                Text("Pickup trip · stop \(store.stopIndex + 1) of \(store.plan?.stops.count ?? 0)")
                     .rescueFont(22, .semibold)
                 PickupTimeline(stops: store.plan?.stops ?? [], allowDelay: true)
                 Text("Arrival is simulated for this demo. No location access is used.").rescueFont(
@@ -300,7 +300,7 @@ struct PickupFlowView: View {
                             Image(systemName: "checkmark").rescueFont(30, .bold).foregroundStyle(
                                 Theme.paper
                             ).frame(width: 72, height: 72).background(Theme.sage, in: Circle())
-                            Text("Rescued").rescueFont(30, .bold)
+                            Text("Picked up").rescueFont(30, .bold)
                             Text("You saved \(Money.text(stop.totals.saved))").rescueFont(
                                 20, .semibold
                             ).foregroundStyle(Theme.save)
@@ -448,7 +448,7 @@ struct FinaleView: View {
     let onDone: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Rescue run complete").rescueFont(15, .medium).foregroundStyle(Theme.butter)
+            Text("Pickups complete").rescueFont(15, .medium).foregroundStyle(Theme.butter)
                 .padding(.top, 40)
             Text(Money.text(store.runImpact.saved)).rescueFont(64, .bold).monospacedDigit()
                 .minimumScaleFactor(0.6).accessibilityIdentifier("impact-saved")
