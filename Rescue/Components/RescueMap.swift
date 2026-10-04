@@ -3,6 +3,7 @@ import SwiftUI
 
 /// MapKit for live tiles; exact native reconstruction of source MapArt for offline demos.
 struct RescueMap: View {
+    @Environment(AppStore.self) private var store
     @AppStorage("useLiveMap") private var liveMap = false
     let items: [Listing]
     var stops: [PickupStop] = []
@@ -38,6 +39,10 @@ struct RescueMap: View {
         "salad": CGPoint(x: 54, y: 78),
     ]
     private func coordinate(_ item: Listing) -> CLLocationCoordinate2D {
+        if store.isBackend {
+            let seller = store.seller(item.sellerID)
+            return CLLocationCoordinate2D(latitude: seller.latitude, longitude: seller.longitude)
+        }
         let point = Self.listingPositions[item.image] ?? CGPoint(x: 50, y: 50)
         return CLLocationCoordinate2D(
             latitude: Self.region.center.latitude + (0.5 - point.y / 100)
@@ -51,7 +56,7 @@ struct RescueMap: View {
                 Map(position: $position) {
                     Annotation("Demo starting point", coordinate: userPoint) { userDot }
                     if stops.isEmpty {
-                        ForEach(items) { item in
+                        ForEach(Array(items.prefix(100))) { item in
                             Annotation(item.name, coordinate: coordinate(item), anchor: .bottom) {
                                 pricePin(item)
                             }
@@ -110,7 +115,7 @@ struct RescueMap: View {
                                             longitude: stop.seller.longitude), size: geometry.size))
                             }
                         } else {
-                            ForEach(items) { item in
+                            ForEach(Array(items.prefix(100))) { item in
                                 let point = projected(coordinate(item), size: geometry.size)
                                 if selectedID == item.id {
                                     Circle().fill(Theme.sage.opacity(0.15)).overlay(

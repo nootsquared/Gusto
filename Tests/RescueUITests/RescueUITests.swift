@@ -119,3 +119,64 @@ final class RescueUITests: XCTestCase {
         add(attachment)
     }
 }
+
+extension RescueUITests {
+    /// Requires MHacksDB, media service and the separate simulator; fixture tests remain independent.
+    func testConnectedSellerPublishesBuyerReservesAndPays() throws {
+        guard ProcessInfo.processInfo.environment["RESCUE_CONNECTED_TESTS"] == "1" else {
+            throw XCTSkip("Enable RESCUE_CONNECTED_TESTS with local services running")
+        }
+        app.terminate()
+        app.launchArguments = ["--uitesting", "--backend", "--account", "riley"]
+        app.launch()
+        app.tabBars.buttons["Sell"].tap()
+        if app.buttons["take-photo"].waitForExistence(timeout: 2) { tap("take-photo") }
+        let name = app.textFields["sell-name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 15))
+        name.tap()
+        name.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 40))
+        name.typeText("Connected Oats")
+        app.buttons["Done"].firstMatch.tapIfExists()
+        app.swipeUp()
+        app.swipeUp()
+        tap("confirm-safety")
+        tap("publish-listing")
+        if !app.staticTexts["published"].waitForExistence(timeout: 15) {
+            screenshot("Connected publish failure")
+            print(app.debugDescription)
+            XCTFail("Connected publish failed")
+            return
+        }
+        app.terminate()
+        app.launchArguments = ["--uitesting", "--backend", "--account", "demo-buyer"]
+        app.launch()
+        app.tabBars.buttons["Discover"].tap()
+        tap("search")
+        let query = app.textFields["search-input"]
+        query.tap()
+        query.typeText("connected oats")
+        let result = app.staticTexts["Connected Oats"].firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 15))
+        result.tap()
+        tap("reserve")
+        tap("close-sheet")
+        tap("cart")
+        XCTAssertTrue(app.staticTexts["Connected Oats"].firstMatch.waitForExistence(timeout: 15))
+        tap("plan-pickups")
+        tap("coordinate", timeout: 15)
+        tap("start-run", timeout: 20)
+        tap("active-run", timeout: 15)
+        tap("arrive", timeout: 15)
+        tap("im-here", timeout: 15)
+        tap("verify-pickup", timeout: 20)
+        tap("pay", timeout: 15)
+        XCTAssertTrue(app.staticTexts["Rescued"].waitForExistence(timeout: 20))
+        screenshot("Connected database payment")
+        tap("continue-run")
+        tap("impact-done")
+    }
+}
+
+extension XCUIElement {
+    fileprivate func tapIfExists() { if exists && isHittable { tap() } }
+}

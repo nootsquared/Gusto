@@ -50,10 +50,14 @@ struct SearchView: View {
                             ListingRow(item: item, identifierPrefix: "result").listRowBackground(
                                 Theme.ivory)
                         }
+                        if store.isBackend && !store.searchCursor.isEmpty {
+                            Button("Load more results") { Task { await store.loadSearchPage() } }
+                        }
                     }.listStyle(.plain).scrollContentBackground(.hidden)
                 }
             }
-        }.navigationTitle("Search").navigationBarTitleDisplayMode(.inline)
+        }.task(id: query) { await store.searchBackend(query) }.navigationTitle("Search")
+            .navigationBarTitleDisplayMode(.inline)
     }
 }
 

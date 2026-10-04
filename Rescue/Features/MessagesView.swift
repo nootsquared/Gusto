@@ -7,7 +7,7 @@ struct MessagesView: View {
         List {
             Text("Coordinate your pickups here").rescueFont(15).foregroundStyle(Theme.secondary)
                 .listRowSeparator(.hidden)
-            ForEach(MockCatalog.sellers) { seller in
+            ForEach(store.messageSellers) { seller in
                 Button {
                     router.chat(seller.id)
                 } label: {
@@ -32,7 +32,8 @@ struct MessagesView: View {
                                 .rescueFont(13).foregroundStyle(Theme.muted)
                             Text(
                                 store.messages[seller.id]?.last?.text
-                                    ?? "Hi! Confirmed for your pickup."
+                                    ?? (store.isBackend
+                                        ? "Start a conversation" : "Hi! Confirmed for your pickup.")
                             ).rescueFont(15).foregroundStyle(Theme.secondary).lineLimit(1)
                         }
                     }.padding(.vertical, 6).foregroundStyle(Theme.ink)
@@ -71,19 +72,21 @@ struct ChatView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 8) {
-                        Text("Today · mock conversation").rescueFont(12).foregroundStyle(
+                        Text(
+                            store.isBackend
+                                ? "Persistent local demo conversation" : "Today · mock conversation"
+                        ).rescueFont(12).foregroundStyle(
                             Theme.muted
                         ).padding(.vertical, 8)
                         ForEach(
-                            store.messages[sellerID] ?? [
-                                ChatMessage("Hi! Confirmed for your pickup.")
-                            ]
+                            store.messages[sellerID] ?? []
                         ) { message in
                             HStack {
                                 if message.outgoing { Spacer(minLength: 60) }
-                                Text(message.text).rescueFont(16).foregroundStyle(
-                                    message.outgoing ? Theme.paper : Theme.ink
-                                ).padding(.horizontal, 14).padding(.vertical, 10)
+                                Text(message.text + (message.delivery.map { " · \($0)" } ?? ""))
+                                    .rescueFont(16).foregroundStyle(
+                                        message.outgoing ? Theme.paper : Theme.ink
+                                    ).padding(.horizontal, 14).padding(.vertical, 10)
                                     .background(
                                         message.outgoing ? Theme.ink : Theme.paper,
                                         in: UnevenRoundedRectangle(
@@ -136,7 +139,11 @@ struct ChatView: View {
                     ).accessibilityLabel("Send message").accessibilityIdentifier("send-message")
                 }.padding(.horizontal, 16)
             }.padding(.vertical, 8).background(Theme.ivory)
-        }.navigationTitle(seller.name).navigationBarTitleDisplayMode(.inline)
+        }.task {
+            store.activeChat = sellerID
+            await store.loadMessages(sellerID)
+        }.onDisappear { if store.activeChat == sellerID { store.activeChat = nil } }
+            .navigationTitle(seller.name).navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {

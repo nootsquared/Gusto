@@ -2,9 +2,25 @@ import SwiftUI
 
 struct FoodPhoto: View {
     let name: String
+    @State private var remoteImage: UIImage?
     var body: some View {
         GeometryReader { geometry in
-            if UIImage(named: name) != nil {
+            if name.hasPrefix("/") || name.hasPrefix("http") {
+                Group {
+                    if let remoteImage {
+                        Image(uiImage: remoteImage).resizable().scaledToFill()
+                    } else {
+                        ZStack {
+                            Theme.line
+                            Image(systemName: "photo").foregroundStyle(Theme.muted)
+                        }
+                    }
+                }.frame(width: geometry.size.width, height: geometry.size.height).clipped()
+                    .task(id: name) {
+                        remoteImage = nil
+                        remoteImage = try? await ImagePipeline.shared.image(name)
+                    }
+            } else if UIImage(named: name) != nil {
                 Image(name).resizable().scaledToFill().frame(
                     width: geometry.size.width, height: geometry.size.height
                 ).clipped()

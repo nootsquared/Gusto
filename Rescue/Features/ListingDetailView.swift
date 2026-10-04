@@ -21,12 +21,7 @@ struct ListingDetailView: View {
                         }
                         .overlay(alignment: .topTrailing) {
                             Button {
-                                if store.savedIDs.contains(id) {
-                                    store.savedIDs.remove(id)
-                                } else {
-                                    store.savedIDs.insert(id)
-                                }
-                                Haptic.tap()
+                                store.toggleSaved(id)
                             } label: {
                                 Image(
                                     systemName: store.savedIDs.contains(id) ? "heart.fill" : "heart"

@@ -27,8 +27,9 @@ struct DiscoverView: View {
     ]
     private var feed: [Listing] { store.visibleListings(query: "") }
     private var picked: [Listing] {
-        let order = ["straw", "avo", "gran", "yog", "eggs"]
-        return order.compactMap(store.listing).filter(store.filters.accepts)
+        return store.personalizedListings.filter {
+            store.filters.accepts($0, sellers: store.sellers)
+        }
     }
     var body: some View {
         ScrollView {
@@ -79,13 +80,13 @@ struct DiscoverView: View {
                 ) { rail(picked) }
                 FeedSection(
                     title: "Buy again",
-                    items: ["straw", "bana", "yog", "gran"].compactMap(store.listing)
+                    items: store.buyAgainListings
                 ) {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(
-                                ["straw", "bana", "yog", "gran"].compactMap(store.listing).filter(
-                                    store.filters.accepts)
+                                store.buyAgainListings.filter(
+                                    { store.filters.accepts($0, sellers: store.sellers) })
                             ) { item in
                                 Button {
                                     if store.reserve(item.id) { Haptic.success() }
@@ -173,10 +174,27 @@ struct DiscoverView: View {
                         Array(feed.sorted { $0.discount > $1.discount }.prefix(6)), width: 156,
                         deal: true)
                 }
+                if store.isBackend {
+                    if store.catalog.isEmpty {
+                        EmptyState(
+                            title: store.online ? "No food nearby" : "Offline",
+                            message: "Start the local services to browse this account.")
+                    }
+                    if !store.feedCursor.isEmpty {
+                        Button("Load more food") { Task { await store.loadNextPage() } }.padding()
+                            .accessibilityIdentifier("load-more-food")
+                    }
+                    Text(store.online ? "Connected local demo" : "Offline · cached browsing").font(
+                        .caption
+                    ).padding(.horizontal, 20)
+                }
                 Text("Better prices. Less waste. One trip.").rescueFont(13).foregroundStyle(
                     Theme.muted
                 ).frame(maxWidth: .infinity).padding(.top, 40).padding(.bottom, 32)
             }
+        }.refreshable {
+            await store.refreshBackend(force: true)
+            await store.loadNextPage(first: true)
         }.background(Theme.ivory).foregroundStyle(Theme.ink).toolbar(.hidden, for: .navigationBar)
     }
     private func rail(
