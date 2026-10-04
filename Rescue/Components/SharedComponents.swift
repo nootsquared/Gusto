@@ -30,7 +30,11 @@ struct FoodPhoto: View {
     @State private var remoteImage: UIImage?
     var body: some View {
         GeometryReader { geometry in
-            if name.hasPrefix("/") || name.hasPrefix("http") {
+            if name.hasPrefix("data:image/jpeg;base64,"),
+                let data = Data(base64Encoded: String(name.dropFirst(23))),
+                let image = UIImage(data: data) {
+                Image(uiImage: image).resizable().scaledToFill().frame(width: geometry.size.width, height: geometry.size.height).clipped()
+            } else if name.hasPrefix("/") || name.hasPrefix("http") {
                 Group {
                     if let remoteImage {
                         Image(uiImage: remoteImage).resizable().scaledToFill()

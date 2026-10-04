@@ -272,7 +272,7 @@ struct ProfilePanelView: View {
                         )
                         Button("List food") {
                             router.sheet = nil
-                            router.tab = .sell
+                            router.tab = .scan
                         }.buttonStyle(.borderedProminent).padding()
                     }
                 } else {

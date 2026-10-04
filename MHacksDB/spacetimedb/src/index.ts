@@ -74,6 +74,7 @@ function mediaURL(ctx: Ctx, id: string) {
   const media = link && ctx.db.mediaAssets.id.find(link.mediaId);
   if (media?.visibility !== 'public') return '';
   // Sample photos ship with the iPhone app; real uploaded media uses a hosted reference.
+  if (media.key.startsWith('data:image/jpeg;base64,')) return media.key;
   return media.key.startsWith('bundle:') ? media.key.slice(7) : `/media/${media.hash}/detail.jpg`;
 }
 function sellerProjection(ctx: Ctx, id: string) {
@@ -325,6 +326,69 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
       ctx.db.freshnessRequests.id.update({...f,status:'responded',responded:stamp(ctx)});
       const l=listing(ctx,f.listingId);ctx.db.listings.id.update({...l,updated:stamp(ctx)});return {};
     }
+    case 'inventory': {
+      const items=[...ctx.db.foodInventory.ownerId.filter(user)].sort((a,b)=>Number(b.scannedAt-a.scannedAt));
+      const readings=[...ctx.db.storageReadings.ownerId.filter(user)].filter(r=>Number(r.recordedAt)>=now(ctx)-259200000)
+        .sort((a,b)=>Number(b.recordedAt-a.recordedAt)).slice(0,500);
+      return {items,readings};
+    }
+    case 'inventory_save': {
+      const old=ctx.db.foodInventory.id.find(q.resourceId);
+      if(old && old.ownerId!==user)fail('unauthorized');
+      const f=JSON.parse(q.text);
+      if(!q.resourceId || !f.name?.trim() || f.name.length>100 || !f.quantity?.trim() || f.quantity.length>100 ||
+        typeof f.photoBase64!=='string' || f.photoBase64.length>90000 || !/^[A-Za-z0-9+/=]*$/.test(f.photoBase64) ||
+        !['Counter','Fridge','Pantry'].includes(f.storage) || !['Not assessed','Unripe','Ripe','Use soon'].includes(f.condition) ||
+        typeof f.variety!=='string' || f.variety.length>100 || typeof f.deviceID!=='string' || f.deviceID.length>100 ||
+        !Number.isFinite(f.confidence) || f.confidence<0 || f.confidence>1)fail('invalid_transition');
+      if(!old && [...ctx.db.foodInventory.ownerId.filter(user)].length>=50)fail('invalid_transition');
+      if(old?.listingID)fail('invalid_transition');
+      const item={id:q.resourceId,ownerId:user,name:f.name.trim(),variety:f.variety.trim(),category:'Produce',
+        condition:f.condition,quantity:f.quantity.trim(),storage:f.storage,photoBase64:f.photoBase64,
+        identification:f.identification==='Apple Vision'?'Apple Vision':'Manual review',confidence:f.confidence,
+        scannedAt:old?.scannedAt??stamp(ctx),listingID:old?.listingID??'',deviceID:f.deviceID};
+      if(old)ctx.db.foodInventory.id.update(item);else ctx.db.foodInventory.insert(item);return item;
+    }
+    case 'inventory_remove': case 'inventory_unlist': {
+      const item=ctx.db.foodInventory.id.find(q.resourceId);if(!item)fail('not_found');if(item.ownerId!==user)fail('unauthorized');
+      if(item.listingID){const l=ownedListing(ctx,user,item.listingID);if(claim(ctx,l.id)||l.status==='sold')fail('unavailable');
+        ctx.db.listings.id.update({...l,status:'archived',version:l.version+1});indexListing(ctx,{...l,status:'archived'});}
+      if(q.action==='inventory_unlist')ctx.db.foodInventory.id.update({...item,listingID:''});
+      else {ctx.db.foodInventory.id.delete(item.id);for(const r of ctx.db.storageReadings.ownerId.filter(user))if(r.itemID===item.id)ctx.db.storageReadings.id.delete(r.id);}
+      return {};
+    }
+    case 'sensor_reading': {
+      const item=ctx.db.foodInventory.id.find(q.resourceId);if(!item)fail('not_found');if(item.ownerId!==user)fail('unauthorized');
+      const r=JSON.parse(q.text);
+      if(!item.deviceID || r.deviceID!==item.deviceID || !Number.isFinite(r.temperature)||r.temperature< -40||r.temperature>85 ||
+        !Number.isFinite(r.humidity)||r.humidity<0||r.humidity>100||!Number.isFinite(r.light)||r.light<0||r.light>200000)fail('invalid_transition');
+      // Phone ingestion timestamps are server-authoritative; the firmware adapter will submit per-item samples.
+      const reading=ctx.db.storageReadings.insert({id:uid(ctx),ownerId:user,itemID:item.id,deviceID:item.deviceID,
+        temperature:r.temperature,humidity:r.humidity,light:r.light,recordedAt:stamp(ctx)});
+      const old=[...ctx.db.storageReadings.ownerId.filter(user)].sort((a,b)=>Number(b.recordedAt-a.recordedAt));
+      for(const row of old.slice(500))ctx.db.storageReadings.id.delete(row.id);return reading;
+    }
+    case 'inventory_publish': {
+      const f=ctx.db.foodInventory.id.find(q.resourceId);if(!f)fail('not_found');if(f.ownerId!==user)fail('unauthorized');
+      if(f.listingID)fail('invalid_transition');const p=JSON.parse(q.text);
+      if(!Number.isInteger(p.price)||p.price<=0||p.price>100000||typeof p.allergens!=='string'||!p.allergens.trim()||p.allergens.length>500 ||
+        p.safeStorage!==true||p.accurateCondition!==true||p.noSpoilage!==true||p.allergensDeclared!==true || !f.photoBase64 ||
+        typeof p.pickupAddress!=='string'||!p.pickupAddress.trim()||p.pickupAddress.length>500||
+        !Number.isFinite(p.latitude)||Math.abs(p.latitude)>90||!Number.isFinite(p.longitude)||Math.abs(p.longitude)>180||
+        !Number.isSafeInteger(p.start)||!Number.isSafeInteger(p.end)||p.end<=p.start||p.end<=now(ctx)||p.end>now(ctx)+259200000)fail('invalid_transition');
+      const id=uid(ctx),locId=uid(ctx),mediaId=uid(ctx),area=p.pickupAddress.trim();
+      ctx.db.pickupLocations.insert({id:locId,sellerId:user,area:'Nearby pickup',latitude:Math.round(p.latitude*100)/100,
+        longitude:Math.round(p.longitude*100)/100,exactLatitude:p.latitude,exactLongitude:p.longitude,address:area,instructions:'Arrange pickup in chat'});
+      const l=ctx.db.listings.insert({id,sellerId:user,title:f.variety?f.variety+' '+f.name:f.name,description:'Identified from a photo and reviewed by the seller.',
+        category:f.category,quantity:f.quantity,price:p.price,retail:p.price,grams:0,freshness:f.condition==='Use soon'?'Use Soon':'Good',
+        opened:false,prepared:false,storage:f.storage,allergens:p.allergens.trim(),vegetarian:true,purchased:'Seller supplied',bestBy:'',status:'published',area:'Nearby pickup',
+        version:1,created:stamp(ctx),creationOrder:9007199254740991n-stamp(ctx),updated:stamp(ctx)});
+      ctx.db.mediaAssets.insert({id:mediaId,ownerId:user,key:'data:image/jpeg;base64,'+f.photoBase64,hash:mediaId,mime:'image/jpeg',width:0,height:0,visibility:'public',state:'ready',created:stamp(ctx)});
+      ctx.db.listingMedia.insert({id:uid(ctx),listingId:id,mediaId,role:'cover',order:0});
+      ctx.db.listingPickupWindows.insert({id:uid(ctx),listingId:id,locationId:locId,start:BigInt(p.start),end:BigInt(p.end),timezone:'America/Detroit'});
+      ctx.db.listingAttestations.insert({id:uid(ctx),listingId:id,version:1,sellerId:user,safeStorage:true,accurateCondition:true,noSpoilage:true,allergensDeclared:true,confirmed:stamp(ctx)});
+      ctx.db.foodInventory.id.update({...f,listingID:id});indexListing(ctx,l);return {id};
+    }
     case 'draft': {
       const id=uid(ctx);ctx.db.listings.insert({id,sellerId:user,title:'',description:'',category:'Breakfast',quantity:'1 package',price:0,retail:899,grams:363,
         freshness:'Fresh',opened:false,prepared:false,storage:'Pantry',allergens:'Oats, almonds',vegetarian:true,purchased:'Today',bestBy:'',status:'draft',area:'Linden Park',version:1,created:stamp(ctx),creationOrder:9007199254740991n-stamp(ctx),updated:stamp(ctx)});
@@ -496,7 +560,7 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
     default: fail('not_found');
   }
 }
-const reads=new Set(['bootstrap','feed','search','map','detail','history','messages','seller_activity','media']);
+const reads=new Set(['bootstrap','feed','search','map','detail','history','messages','seller_activity','media','inventory']);
 export const api = db.procedure({ request: Request }, Result, (ctx, { request }) => {
   try {
     return ctx.withTx(tx => {
@@ -505,7 +569,7 @@ export const api = db.procedure({ request: Request }, Result, (ctx, { request })
       if(rate?.window===window && rate.count>=240)fail('rate_limited');
       const updatedRate={userId:user,window,count:rate?.window===window?rate.count+1:1};
       if(rate)tx.db.rateLimits.userId.update(updatedRate);else tx.db.rateLimits.insert(updatedRate);
-      if(request.text.length>16000 || request.resourceId.length>200 || request.cursor.length>20000)fail('invalid_transition');
+      if(request.text.length>(request.action==='inventory_save'?110000:16000) || request.resourceId.length>200 || request.cursor.length>20000)fail('invalid_transition');
       if(!reads.has(request.action)){
         if(!request.operationId || request.operationId.length>100)fail('invalid_transition');
         const id=`${user}:${request.operationId}`, fingerprint=json(request);

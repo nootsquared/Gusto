@@ -9,6 +9,9 @@ import Observation
     public private(set) var isBackend = false
     public private(set) var online = false
     public private(set) var accountID = "fixture"
+    public private(set) var inventory: [InventoryFood] = []
+    public private(set) var storageReadings: [StorageReading] = []
+    public private(set) var inventoryLoading = false
     public private(set) var profileName = "Priya S."
     public private(set) var ownListings: [Listing] = []
     public private(set) var sales: [Receipt] = []
@@ -453,6 +456,9 @@ import Observation
         sessionGeneration = UUID()
         planGeneration = UUID()
         catalog = MockCatalog.listings
+        inventory = []
+        storageReadings = []
+        ownListings = []
         cart = []
         filters = Filters()
         query = ""
@@ -481,6 +487,9 @@ extension AppStore {
         isBackend = true
         online = false
         backendBusy = false
+        inventory = []
+        storageReadings = []
+        inventoryLoading = false
         accountID = newRepository.accountID
         profileName = "Loading account…"
         catalog = []
@@ -538,6 +547,9 @@ extension AppStore {
         sessionGeneration = UUID()
         planGeneration = UUID()
         repository = nil
+        inventory = []
+        storageReadings = []
+        inventoryLoading = false
         accountID = ""
         isBackend = true
         online = false
@@ -1121,6 +1133,129 @@ extension AppStore {
                 _ = try await repository.request(request)
                 if generation == sessionGeneration { await refreshBackend(force: true) }
             } catch { if generation == sessionGeneration { notice = error.localizedDescription } }
+        }
+    }
+}
+
+extension AppStore {
+    public func loadInventory() async {
+        guard let repository, !inventoryLoading else { return }
+        let generation = sessionGeneration
+        inventoryLoading = true
+        defer { if generation == sessionGeneration { inventoryLoading = false } }
+        do {
+            let response = try await repository.request(APIRequest("inventory"))
+            struct Snapshot: Decodable {
+                let items: [InventoryFood]
+                let readings: [StorageReading]
+            }
+            let snapshot = try JSONDecoder().decode(Snapshot.self, from: response.payload)
+            guard generation == sessionGeneration else { return }
+            inventory = snapshot.items
+            storageReadings = snapshot.readings
+        } catch { if generation == sessionGeneration { notice = error.localizedDescription } }
+    }
+    public func saveInventoryFood(_ item: InventoryFood) async -> Bool {
+        guard !item.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return false
+        }
+        if !isBackend {
+            inventory.removeAll { $0.id == item.id }
+            inventory.insert(item, at: 0)
+            return true
+        }
+        guard let repository, !backendBusy else { return false }
+        let generation = sessionGeneration
+        backendBusy = true
+        defer { if generation == sessionGeneration { backendBusy = false } }
+        do {
+            let data = try JSONEncoder().encode(item)
+            _ = try await repository.request(
+                APIRequest(
+                    "inventory_save", resourceID: item.id,
+                    text: String(decoding: data, as: UTF8.self), write: true))
+            guard generation == sessionGeneration else { return false }
+            await loadInventory()
+            return true
+        } catch {
+            if generation == sessionGeneration { notice = error.localizedDescription }
+            return false
+        }
+    }
+    public func unlistInventoryFood(_ id: String) async {
+        if !isBackend {
+            guard let index = inventory.firstIndex(where: { $0.id == id }) else { return }
+            let listingID = inventory[index].listingID
+            guard !cart.contains(listingID) else {
+                notice = "This listing has a pickup reservation"
+                return
+            }
+            catalog.removeAll { $0.id == listingID }
+            ownListings.removeAll { $0.id == listingID }
+            inventory[index].listingID = ""
+            return
+        }
+        if await backendWrite("inventory_unlist", id: id) { await loadInventory() }
+    }
+    public func removeInventoryFood(_ id: String) async {
+        if !isBackend {
+            await unlistInventoryFood(id)
+            guard let item = inventory.first(where: { $0.id == id }), item.listingID.isEmpty else {
+                return
+            }
+            inventory.removeAll { $0.id == id }
+            return
+        }
+        if await backendWrite("inventory_remove", id: id) { await loadInventory() }
+    }
+    public func sellInventoryFood(
+        _ item: InventoryFood, price: Int, allergens: String,
+        pickupAddress: String, latitude: Double, longitude: Double,
+        start: Date, end: Date, attestations: Bool
+    ) async -> Bool {
+        guard attestations, price > 0, end > start, end > Date() else { return false }
+        if !isBackend {
+            guard !item.isListed, let index = inventory.firstIndex(where: { $0.id == item.id })
+            else { return false }
+            let id = "inventory-\(item.id)"
+            var listing = Listing(
+                id: id, name: item.title, price: price, retail: price,
+                distance: 0, freshness: item.condition == "Use soon" ? .useSoon : .good,
+                pickup: "Scheduled pickup", updated: "just now", stale: false,
+                sellerID: "nina", category: item.category, quantity: item.quantity, weight: 0,
+                opened: false, storage: item.storage, allergens: allergens,
+                purchased: "Seller supplied",
+                receipt: false, vegetarian: true, prepared: false)
+            listing.imageURL = "data:image/jpeg;base64," + item.photoBase64
+            catalog.insert(listing, at: 0)
+            ownListings.insert(listing, at: 0)
+            inventory[index].listingID = id
+            return true
+        }
+        guard let repository, !backendBusy else { return false }
+        let generation = sessionGeneration
+        backendBusy = true
+        defer { if generation == sessionGeneration { backendBusy = false } }
+        do {
+            let data = try JSONSerialization.data(withJSONObject: [
+                "price": price, "allergens": allergens, "pickupAddress": pickupAddress,
+                "latitude": latitude, "longitude": longitude,
+                "start": floor(start.timeIntervalSince1970 * 1000),
+                "end": floor(end.timeIntervalSince1970 * 1000),
+                "safeStorage": attestations, "accurateCondition": attestations,
+                "noSpoilage": attestations, "allergensDeclared": attestations,
+            ])
+            _ = try await repository.request(
+                APIRequest(
+                    "inventory_publish", resourceID: item.id,
+                    text: String(decoding: data, as: UTF8.self), write: true))
+            guard generation == sessionGeneration else { return false }
+            await loadInventory()
+            await refreshBackend(force: true)
+            return true
+        } catch {
+            if generation == sessionGeneration { notice = error.localizedDescription }
+            return false
         }
     }
 }

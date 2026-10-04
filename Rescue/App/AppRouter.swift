@@ -1,7 +1,7 @@
 import Observation
 import SwiftUI
 
-enum AppTab: String, CaseIterable { case discover, map, sell, messages, you }
+enum AppTab: String, CaseIterable { case discover, map, scan, messages, you }
 enum ProfilePanel: String {
     case impact, referrals, alerts, listings, purchases, saved, payment, verification, settings
 }
@@ -11,6 +11,8 @@ enum AppSheet {
     case collection(String, [String])
     case chat(String)
     case run
+    case scanCamera, scanReview, sensor
+    case scanItem(String)
     case profile(ProfilePanel)
 }
 @MainActor @Observable final class AppRouter {

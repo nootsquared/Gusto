@@ -141,7 +141,7 @@ struct DiscoverView: View {
                             : "Check your connection, then pull down to try again.")
                     if store.online {
                         PrimaryButton(title: "List food", id: "empty-feed-sell") {
-                            router.tab = .sell
+                            router.tab = .scan
                         }.padding(.horizontal, 20)
                     }
                 } else {

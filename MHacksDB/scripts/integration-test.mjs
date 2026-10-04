@@ -19,6 +19,36 @@ assert.equal((await api(other,'messages',{resourceId:'demo-buyer:maya'})).error,
 assert.equal((await api(buyer,'detail',{resourceId:'straw'})).data.privateLocation,undefined);
 await assert.rejects(()=>call(buyer,'configureLocal',[true]));
 console.log('PASS: sender authorization, private SQL, conversation isolation, owner-only configuration');
+// Private scans stay account-scoped and only become marketplace listings after explicit review.
+const foodID='integration-food-'+op();
+const food={name:'Tomato',variety:'Roma',quantity:'3 tomatoes',condition:'Ripe',storage:'Counter',
+  photoBase64:'/9j/2Q==',identification:'Manual review',confidence:0,deviceID:'integration-sensor'};
+await good(other,'inventory_save',{resourceId:foodID,text:JSON.stringify(food),operationId:op()});
+assert((await good(other,'inventory')).items.some(i=>i.id===foodID));
+assert(!(await good(buyer,'inventory')).items.some(i=>i.id===foodID));
+assert.equal((await api(buyer,'inventory_save',{resourceId:foodID,text:JSON.stringify(food),operationId:op()})).error,'unauthorized');
+assert.equal((await api(buyer,'inventory_remove',{resourceId:foodID,operationId:op()})).error,'unauthorized');
+assert(!(await good(buyer,'search',{text:JSON.stringify({query:'Roma Tomato'})})).listings.some(l=>l.id===foodID));
+const sample={deviceID:'integration-sensor',temperature:22,humidity:56,light:180};
+assert.equal((await api(buyer,'sensor_reading',{resourceId:foodID,text:JSON.stringify(sample),operationId:op()})).error,'unauthorized');
+await good(other,'sensor_reading',{resourceId:foodID,text:JSON.stringify(sample),operationId:op()});
+assert.equal((await good(other,'inventory')).readings.filter(r=>r.itemID===foodID).length,1);
+assert(!(await good(buyer,'inventory')).readings.some(r=>r.itemID===foodID));
+assert.equal((await api(other,'sensor_reading',{resourceId:foodID,text:JSON.stringify({...sample,humidity:150}),operationId:op()})).error,'invalid_transition');
+const listingReview={price:250,allergens:'None known',pickupAddress:'Museum of Art, Ann Arbor',latitude:42.275,longitude:-83.74,
+  start:Date.now()+3600000,end:Date.now()+10800000,safeStorage:true,accurateCondition:true,noSpoilage:true,allergensDeclared:true};
+assert.equal((await api(other,'inventory_publish',{resourceId:foodID,text:JSON.stringify({...listingReview,safeStorage:false}),operationId:op()})).error,'invalid_transition');
+const foodListing=await good(other,'inventory_publish',{resourceId:foodID,text:JSON.stringify(listingReview),operationId:op()});
+assert.equal((await good(other,'inventory')).items.find(i=>i.id===foodID).listingID,foodListing.id);
+const listedFood=(await good(buyer,'search',{text:JSON.stringify({query:'Roma Tomato'})})).listings.find(l=>l.id===foodListing.id);
+assert(listedFood);assert.equal(listedFood.imageURL,'data:image/jpeg;base64,'+food.photoBase64);
+assert.equal((await api(other,'inventory_publish',{resourceId:foodID,text:JSON.stringify(listingReview),operationId:op()})).error,'invalid_transition');
+await good(other,'inventory_unlist',{resourceId:foodID,operationId:op()});
+assert(!(await good(buyer,'search',{text:JSON.stringify({query:'Roma Tomato'})})).listings.some(l=>l.id===foodListing.id));
+await good(other,'inventory_remove',{resourceId:foodID,operationId:op()});
+assert(!(await good(other,'inventory')).readings.some(r=>r.itemID===foodID));
+console.log('PASS: private scan ownership, sensor validation, reviewed listing with real-photo reference, unlist and deletion');
+
 // Saving a cart must not hold inventory or start seller coordination.
 for(const token of [buyer,other]){
   await good(token,'add_cart',{resourceId:'straw',operationId:op()});

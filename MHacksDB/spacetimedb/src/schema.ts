@@ -163,7 +163,17 @@ const configuration = table({ name: 'configuration' }, { id: t.string().primaryK
 const databaseOwner = table({ name: 'database_owner' }, { id: t.string().primaryKey(), identity: t.identity() });
 const identifiers = table({name:'identifiers'},{id:t.string().primaryKey(),next:t.u64()});
 const rateLimits = table({ name:'rate_limits' }, { userId:t.string().primaryKey(), window:t.u64(), count:t.u32() });
-const db = schema({ identifiers, rateLimits, databaseOwner, users, userIdentities, userPreferences, listings, mediaAssets, listingMedia,
+const foodInventory = table({name:'food_inventory'}, {
+  id:t.string().primaryKey(), ownerId:t.string().index('btree'), name:t.string(), variety:t.string(),
+  category:t.string(), condition:t.string(), quantity:t.string(), storage:t.string(),
+  photoBase64:t.string(), identification:t.string(), confidence:t.f64(), scannedAt:t.u64(),
+  listingID:t.string(), deviceID:t.string(),
+});
+const storageReadings = table({name:'storage_readings'}, {
+  id:t.string().primaryKey(), ownerId:t.string().index('btree'), itemID:t.string(), deviceID:t.string(),
+  temperature:t.f64(), humidity:t.f64(), light:t.f64(), recordedAt:t.u64(),
+});
+const db = schema({ foodInventory, storageReadings, identifiers, rateLimits, databaseOwner, users, userIdentities, userPreferences, listings, mediaAssets, listingMedia,
   pickupLocations, listingPickupWindows, listingAttestations, tags, listingTags, listingSearchTerms,
   searchTermStats, carts, cartItems, reservations, inventoryClaims, pickupRuns, pickupStops,
   pickupStopItems, pickupScheduleChanges, conversations, conversationMembers, messages,

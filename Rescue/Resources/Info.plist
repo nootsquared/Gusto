@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Gusto uses your camera to identify food and save a photo with your items.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Gusto connects to your storage sensor to monitor conditions around your food.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

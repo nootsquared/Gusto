@@ -12,14 +12,16 @@ import SwiftUI
     )
     @State private var router = AppRouter()
     @State private var location = LocationController()
+    @State private var scanner = FoodScanController()
     var body: some Scene {
         WindowGroup {
-            RootView().environment(store).environment(router).environment(location).preferredColorScheme(.light)
+            RootView().environment(store).environment(router).environment(location).environment(scanner).preferredColorScheme(.light)
         }
     }
 }
 
 struct RootView: View {
+    @Environment(FoodScanController.self) private var scanner
     @Environment(LocationController.self) private var location
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
@@ -41,13 +43,13 @@ struct RootView: View {
                 Label("Map", systemImage: "map").environment(\.symbolVariants, .none)
             }
             .tag(AppTab.map)
-            NavigationStack { SellView() }.tabItem {
+            NavigationStack { ScanView() }.tabItem {
                 Label {
-                    Text("Sell")
+                    Text("Scan")
                 } icon: {
                     Image(uiImage: NavigationArtwork.sell).renderingMode(.original)
                 }
-            }.tag(AppTab.sell)
+            }.tag(AppTab.scan)
             NavigationStack { MessagesView() }.tabItem {
                 Label("Messages", systemImage: "bubble.left.and.bubble.right").environment(
                     \.symbolVariants, .none)
@@ -66,6 +68,11 @@ struct RootView: View {
                 AppTab.you)
         }.task {
             let args = ProcessInfo.processInfo.arguments
+            #if DEBUG
+                if args.contains("--map-preview") { router.tab = .map }
+                if args.contains("--messages-preview") { router.tab = .messages }
+                if args.contains("--scan-preview") { router.tab = .scan }
+            #endif
             if !args.contains("--fixture")
                 && (!args.contains("--uitesting") || args.contains("--backend"))
             {
@@ -113,7 +120,8 @@ struct RootView: View {
                     WelcomeView { welcomePreviewDismissed = true }
                 }
             #endif
-        }.task(id: "\(scenePhase)-\(store.isBackend)-\(store.accountID)") {
+        }.onChange(of: store.accountID) { _, _ in scanner.reset() }
+        .task(id: "\(scenePhase)-\(store.isBackend)-\(store.accountID)") {
             if scenePhase == .active { await store.pollBackend() }
         }.tint(Theme.ink).background(Theme.ivory.ignoresSafeArea())
             .toolbarBackground(Theme.paper, for: .tabBar).toolbarBackground(.visible, for: .tabBar)
@@ -222,6 +230,10 @@ struct SheetHost: View {
                 case .collection(let title, let ids): CollectionView(title: title, ids: ids)
                 case .chat(let seller): ChatView(sellerID: seller)
                 case .run: PickupFlowView()
+                case .scanCamera: ScanCameraHost()
+                case .scanReview: ScanReviewView()
+                case .scanItem(let id): InventoryDetailView(id: id)
+                case .sensor: SensorConnectionView()
                 case .profile(let panel): ProfilePanelView(panel: panel)
                 case nil: Color.clear
                 }
@@ -237,7 +249,7 @@ struct SheetHost: View {
                     }
                 }.toolbarBackground(Theme.ivory, for: .navigationBar).toolbarBackground(
                     .visible, for: .navigationBar)
-        }.tint(Theme.ink)
+        }.tint(Theme.ink).toolbar(.visible, for: .navigationBar)
     }
 }
 
