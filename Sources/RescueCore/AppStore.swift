@@ -96,9 +96,9 @@ import Observation
             ?? catalog.first { $0.sellerID == sellerID }
     }
 
-    @discardableResult public func reserve(_ id: String) -> Bool {
+    @discardableResult public func addToCart(_ id: String) -> Bool {
         if isBackend {
-            if listing(id) != nil { launchWrite("reserve", id: id) }
+            if listing(id) != nil { launchWrite("add_cart", id: id) }
             return false
         }
         guard !runActive, let item = listing(id), item.available, !cart.contains(id) else {
@@ -106,7 +106,7 @@ import Observation
         }
         cart.append(id)
         invalidatePlan()
-        notice = "\(item.name) reserved · \(cart.count) items · one easy trip"
+        notice = "\(item.name) added to cart"
         return true
     }
     public func remove(_ id: String) {
@@ -123,6 +123,15 @@ import Observation
         plan = nil
         coordinating = false
         counterSellerID = nil
+    }
+    public func confirmCartAndPlan() async -> Bool {
+        guard !runActive, !cart.isEmpty else { return false }
+        if isBackend {
+            let confirmed = await backendWrite("plan", text: RouteMode.fastest.rawValue)
+            return confirmed && plan != nil
+        }
+        makePlan()
+        return plan != nil
     }
     public func makePlan(mode: RouteMode = .fastest) {
         if isBackend {
@@ -773,19 +782,24 @@ extension AppStore {
         guard !backendBusy else { return }
         Task { await backendWrite(action, id: id, text: text) }
     }
-    private func backendWrite(_ action: String, id: String = "", text: String = "") async {
-        guard let repository, !backendBusy else { return }
+    @discardableResult
+    private func backendWrite(_ action: String, id: String = "", text: String = "") async -> Bool {
+        guard let repository, !backendBusy else { return false }
         let generation = sessionGeneration
         backendBusy = true
         defer { if generation == sessionGeneration { backendBusy = false } }
         do {
             _ = try await repository.request(
                 APIRequest(action, resourceID: id, text: text, write: true))
-            guard generation == sessionGeneration else { return }
+            guard generation == sessionGeneration else { return false }
             online = true
             await refreshBackend(force: true)
-            if action == "reserve" { notice = "Reserved for 30 minutes · server confirmed" }
-        } catch { if generation == sessionGeneration { notice = error.localizedDescription } }
+            if action == "add_cart" { notice = "Added to cart" }
+            return generation == sessionGeneration
+        } catch {
+            if generation == sessionGeneration { notice = error.localizedDescription }
+            return false
+        }
     }
     public func publishListing(
         name: String, price: Int, freshness: Freshness, pickup: String, confirmations: Int

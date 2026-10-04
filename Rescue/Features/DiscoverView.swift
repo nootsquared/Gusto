@@ -92,7 +92,7 @@ struct DiscoverView: View {
                                     }
                                 ) { item in
                                     Button {
-                                        if store.reserve(item.id) { Haptic.success() }
+                                        if store.addToCart(item.id) { Haptic.success() }
                                     } label: {
                                         HStack(spacing: 12) {
                                             FoodPhoto(name: item.image).frame(width: 64, height: 64)

@@ -9,7 +9,7 @@ import XCTest
 @MainActor final class RescueCoreTests: XCTestCase {
     private func makeStore() -> AppStore { AppStore(service: DemoService(delayNanoseconds: 0)) }
     private func reserveDemo(_ store: AppStore) {
-        for id in ["straw", "yog", "bread", "pasta"] { XCTAssertTrue(store.reserve(id)) }
+        for id in ["straw", "yog", "bread", "pasta"] { XCTAssertTrue(store.addToCart(id)) }
     }
     private func begin(_ store: AppStore) async {
         store.makePlan()
@@ -29,16 +29,16 @@ import XCTest
     }
     func testReservationIsUniqueAndInvalidIDsAreRejected() async {
         let store = makeStore()
-        XCTAssertTrue(store.reserve("straw"))
-        XCTAssertFalse(store.reserve("straw"))
-        XCTAssertFalse(store.reserve("missing"))
+        XCTAssertTrue(store.addToCart("straw"))
+        XCTAssertFalse(store.addToCart("straw"))
+        XCTAssertFalse(store.addToCart("missing"))
         XCTAssertEqual(store.cart, ["straw"])
     }
     func testCartGroupsMultipleItemsPerSeller() async {
         let store = makeStore()
-        store.reserve("straw")
-        store.reserve("bana")
-        store.reserve("yog")
+        store.addToCart("straw")
+        store.addToCart("bana")
+        store.addToCart("yog")
         store.makePlan()
         XCTAssertEqual(store.plan?.stops.count, 2)
         XCTAssertEqual(store.plan?.stops.first?.items.count, 2)
@@ -77,7 +77,7 @@ import XCTest
     }
     func testRouteModesProduceDifferentPlans() async {
         let store = makeStore()
-        for id in ["straw", "avo", "yog", "bread", "pasta"] { store.reserve(id) }
+        for id in ["straw", "avo", "yog", "bread", "pasta"] { store.addToCart(id) }
         store.makePlan()
         let fastest = store.plan!
         store.makePlan(mode: .shortest)
@@ -88,11 +88,11 @@ import XCTest
     }
     func testCartMutationInvalidatesConfirmations() async {
         let store = makeStore()
-        store.reserve("straw")
+        store.addToCart("straw")
         store.makePlan()
         await store.coordinate()
         XCTAssertEqual(store.plan?.allConfirmed, true)
-        store.reserve("yog")
+        store.addToCart("yog")
         XCTAssertNil(store.plan)
         XCTAssertFalse(store.startRun())
         store.makePlan()
@@ -133,11 +133,11 @@ import XCTest
         XCTAssertEqual(store.phase, .idle)
         XCTAssertTrue(store.cart.isEmpty)
         XCTAssertEqual(store.impact.saved, 1463)
-        XCTAssertFalse(store.reserve("straw"))
+        XCTAssertFalse(store.addToCart("straw"))
     }
     func testDuplicatePayCannotDoubleCharge() async {
         let store = AppStore(service: DemoService(delayNanoseconds: 10_000_000))
-        store.reserve("straw")
+        store.addToCart("straw")
         await begin(store)
         store.arrive()
         await store.announceArrival()
@@ -152,7 +152,7 @@ import XCTest
     }
     func testIssueSkipsChargeAndImpact() async {
         let store = makeStore()
-        store.reserve("straw")
+        store.addToCart("straw")
         await begin(store)
         store.arrive()
         await store.announceArrival()
@@ -164,7 +164,7 @@ import XCTest
     }
     func testOutOfOrderPaymentAndVerificationAreRejected() async {
         let store = makeStore()
-        store.reserve("straw")
+        store.addToCart("straw")
         await store.pay()
         store.verify()
         store.arrive()
@@ -177,7 +177,7 @@ import XCTest
         await begin(store)
         let ids = store.cart
         let stops = store.plan!.stops.map(\.id)
-        XCTAssertFalse(store.reserve("bana"))
+        XCTAssertFalse(store.addToCart("bana"))
         store.remove("straw")
         store.makePlan(mode: .shortest)
         XCTAssertEqual(store.cart, ids)
@@ -281,7 +281,7 @@ import XCTest
     func testSameSellerAcrossRunsHasDistinctReceiptIDs() async {
         let store = makeStore()
         for id in ["straw", "bana"] {
-            store.reserve(id)
+            store.addToCart(id)
             await begin(store)
             store.arrive()
             await store.announceArrival()

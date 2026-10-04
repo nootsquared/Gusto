@@ -34,9 +34,38 @@ struct CartView: View {
             if store.cart.isEmpty {
                 VStack {
                     EmptyState(
-                        title: "Nothing reserved yet", message: "Good food is waiting nearby.",
+                        title: "Your cart is empty", message: "Good food is waiting nearby.",
                         symbol: "bag")
-                    PrimaryButton(title: "Discover food") { router.sheet = nil }.padding(20)
+                    Button {
+                        Haptic.tap()
+                        router.tab = .discover
+                        router.sheet = nil
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "safari")
+                                .font(.system(size: 22, weight: .medium))
+                                .frame(width: 38, height: 38)
+                                .background(.white.opacity(0.10), in: Circle())
+                            Text("Discover food").rescueFont(17, .semibold)
+                            Spacer()
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundStyle(Theme.butter)
+                        }.foregroundStyle(Theme.paper).padding(.horizontal, 18)
+                            .frame(height: 66)
+                            .background(
+                                LinearGradient(
+                                    colors: [Theme.deep, Theme.sage],
+                                    startPoint: .leading, endPoint: .trailing),
+                                in: RoundedRectangle(cornerRadius: 22)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 22)
+                                    .stroke(.white.opacity(0.15), lineWidth: 1)
+                            )
+                            .shadow(color: Theme.deep.opacity(0.16), radius: 12, y: 6)
+                    }.buttonStyle(.plain).accessibilityIdentifier("discover-food")
+                        .padding(20)
                 }
             } else {
                 ScrollView {
@@ -77,13 +106,19 @@ struct CartView: View {
                 }.safeAreaInset(edge: .bottom) {
                     BottomAction {
                         PrimaryButton(
-                            title: store.runActive ? "View rescue run" : "Plan My Pickups",
-                            symbol: "sparkles", id: "plan-pickups"
+                            title: store.runActive ? "View pickups" : "Confirm & plan pickups",
+                            symbol: "sparkles", disabled: store.backendBusy, id: "plan-pickups"
                         ) {
-                            if !store.runActive { store.makePlan() }
-                            router.sheet = .run
+                            Task {
+                                if store.runActive {
+                                    router.sheet = .run
+                                } else if await store.confirmCartAndPlan() {
+                                    router.sheet = .run
+                                }
+                            }
                         }
-                        Text("No charge until pickup · demo payments only").rescueFont(12)
+                        Text("Confirm to reserve your items. Contact sellers in the next step.")
+                            .rescueFont(12)
                             .foregroundStyle(Theme.muted)
                     }
                 }
@@ -168,7 +203,7 @@ struct PickupFlowView: View {
                         Theme.muted)
                 } else {
                     EmptyState(
-                        title: "Reserve food first",
+                        title: "Add food to your cart",
                         message: "Your cart needs an available item before planning.")
                 }
             }.padding(20)

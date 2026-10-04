@@ -157,17 +157,17 @@ struct AddButton: View {
     @Environment(AppStore.self) private var store
     let item: Listing
     var body: some View {
-        let reserved = store.cart.contains(item.id)
+        let inCart = store.cart.contains(item.id)
         Button {
-            if store.reserve(item.id) { Haptic.success() }
+            if store.addToCart(item.id) { Haptic.success() }
         } label: {
-            Image(systemName: reserved ? "checkmark" : "plus").rescueFont(14, .semibold)
-                .frame(width: 28, height: 28).foregroundStyle(reserved ? Theme.paper : Theme.ink)
-                .background(reserved ? Theme.sage : Theme.paper, in: Circle())
+            Image(systemName: inCart ? "checkmark" : "plus").rescueFont(14, .semibold)
+                .frame(width: 28, height: 28).foregroundStyle(inCart ? Theme.paper : Theme.ink)
+                .background(inCart ? Theme.sage : Theme.paper, in: Circle())
                 .shadow(color: Theme.ink.opacity(0.07), radius: 3, y: 2)
                 .frame(width: 44, height: 44).contentShape(Rectangle())
-        }.buttonStyle(.plain).disabled(reserved || store.runActive || !item.available)
-            .accessibilityLabel(reserved ? "Reserved \(item.name)" : "Add \(item.name)")
+        }.buttonStyle(.plain).disabled(inCart || store.runActive || store.backendBusy || !item.available)
+            .accessibilityLabel(inCart ? "In cart: \(item.name)" : "Add \(item.name)")
             .accessibilityIdentifier("add-\(item.id)")
     }
 }

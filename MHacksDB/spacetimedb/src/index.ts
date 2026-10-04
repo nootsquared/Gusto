@@ -221,10 +221,10 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
   switch (q.action) {
     case 'bootstrap': {
       for (const r of ctx.db.reservations.byBuyer.filter(user)) if (['held','booked'].includes(r.status) && r.expires <= now(ctx)) release(ctx,r.id,'expired');
-      const items = [...ctx.db.cartItems.buyerId.filter(user)].filter(i => !expired(ctx, i.reservationId));
+      const items = [...ctx.db.cartItems.buyerId.filter(user)].filter(i => !i.reservationId || !expired(ctx, i.reservationId));
       return { user: ctx.db.users.id.find(user), preferences: ctx.db.userPreferences.userId.find(user),
         cart: items.map(i => i.listingId), cartListings: items.map(i => listingProjection(ctx,listing(ctx,i.listingId))),
-        reservations: items.map(i => ctx.db.reservations.id.find(i.reservationId)),
+        reservations: items.filter(i => i.reservationId).map(i => ctx.db.reservations.id.find(i.reservationId)),
         favorites: [...ctx.db.favorites.userId.filter(user)].map(f=>f.listingId),follows:[...ctx.db.follows.userId.filter(user)],
         savedListings: [...ctx.db.favorites.userId.filter(user)].map(f=>ctx.db.listings.id.find(f.listingId)).filter((l): l is ReturnType<typeof listing> => !!l && l.status === 'published').map(l=>listingProjection(ctx,l)),
         sellers: [...ctx.db.users.iter()].map(u=>sellerProjection(ctx,u.id)), run: runProjection(ctx,user),
@@ -238,6 +238,21 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
       const l = listing(ctx,q.resourceId); if (l.status !== 'published' && l.sellerId !== user) fail('not_found');
       return { listing: listingProjection(ctx,l), seller: sellerProjection(ctx,l.sellerId) };
     }
+    case 'add_cart': {
+      if (activeRun(ctx,user)) fail('invalid_transition');
+      const l = listing(ctx,q.resourceId);
+      if (l.status !== 'published' || l.sellerId === user) fail('unavailable');
+      const id = `${user}:${l.id}`;
+      const existing = ctx.db.cartItems.id.find(id);
+      if (existing) return existing;
+      const c = claim(ctx,l.id);
+      if (c && checkClaim(ctx,c.reservationId).buyerId !== user) fail('unavailable');
+      invalidateDraft(ctx,user);
+      // An empty reservation ID is a saved cart item: no inventory claim, timer, or seller contact.
+      const item = ctx.db.cartItems.insert({id,buyerId:user,listingId:l.id,reservationId:'',added:now(ctx)});
+      bumpCart(ctx,user);
+      return item;
+    }
     case 'reserve': {
       if (activeRun(ctx,user)) fail('invalid_transition');
       const l = listing(ctx,q.resourceId); if (l.status !== 'published' || l.sellerId === user) fail('unavailable');
@@ -247,12 +262,18 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
       const r = ctx.db.reservations.insert({ id: uid(ctx), listingId:l.id, buyerId:user, sellerId:l.sellerId, status:'held',
         expires:stamp(ctx)+1800000n, listingVersion:l.version, price:l.price });
       ctx.db.inventoryClaims.insert({ listingId:l.id,reservationId:r.id });
-      ctx.db.cartItems.insert({ id:`${user}:${l.id}`,buyerId:user,listingId:l.id,reservationId:r.id,added:now(ctx) });
+      const cartID = `${user}:${l.id}`;
+      const saved = ctx.db.cartItems.id.find(cartID);
+      if (saved) ctx.db.cartItems.id.update({...saved,reservationId:r.id});
+      else ctx.db.cartItems.insert({ id:cartID,buyerId:user,listingId:l.id,reservationId:r.id,added:now(ctx) });
       ctx.db.scheduledExpiryTasks.insert({ scheduledId:0n,id:r.id,scheduledAt:ScheduleAt.time(r.expires*1000n),due:r.expires,kind:'reservation',resourceId:r.id }); bumpCart(ctx,user); return r;
     }
     case 'release': {
       if (activeRun(ctx,user)) fail('invalid_transition');
-      const c=ctx.db.cartItems.id.find(`${user}:${q.resourceId}`); if (c) release(ctx,c.reservationId); bumpCart(ctx,user); return {};
+      const c=ctx.db.cartItems.id.find(`${user}:${q.resourceId}`);
+      if (c?.reservationId) release(ctx,c.reservationId);
+      else if (c) ctx.db.cartItems.id.delete(c.id);
+      invalidateDraft(ctx,user); bumpCart(ctx,user); return {};
     }
     case 'favorite': {
       const l=listing(ctx,q.resourceId); if(l.status !== 'published' && l.sellerId !== user) fail('not_found');
@@ -347,7 +368,10 @@ function process(ctx: Ctx, user: string, q: RequestData): unknown {
     }
     case 'plan': {
       if(activeRun(ctx,user))fail('invalid_transition');
-      const items=[...ctx.db.cartItems.buyerId.filter(user)];if(!items.length)fail('invalid_transition');
+      const savedItems=[...ctx.db.cartItems.buyerId.filter(user)];if(!savedItems.length)fail('invalid_transition');
+      // Confirmation reserves the entire cart in this transaction; failure rolls back every claim.
+      for (const i of savedItems) if (!i.reservationId) process(ctx,user,{...q,action:'reserve',resourceId:i.listingId});
+      const items=[...ctx.db.cartItems.buyerId.filter(user)];
       for(const i of items)checkClaim(ctx,i.reservationId);
       invalidateDraft(ctx,user);
       const run=ctx.db.pickupRuns.insert({id:uid(ctx),buyerId:user,mode:q.text||'Fastest',status:'draft',phase:'idle',currentStop:0,version:1,created:stamp(ctx)});

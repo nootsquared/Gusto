@@ -208,12 +208,12 @@ private final class StubURLProtocol: URLProtocol {
         XCTAssertFalse(store.online)
         XCTAssertTrue(store.catalog.isEmpty)
         XCTAssertTrue(store.messages.isEmpty)
-        XCTAssertFalse(store.reserve("straw"))
+        XCTAssertFalse(store.addToCart("straw"))
         XCTAssertTrue(store.cart.isEmpty)
     }
     func testSwitchImmediatelyClearsPreviousPrivateState() async throws {
         let store = AppStore(service: DemoService(delayNanoseconds: 0))
-        store.reserve("straw")
+        store.addToCart("straw")
         store.savedIDs.insert("straw")
         StubURLProtocol.handler = { _ in throw URLError(.notConnectedToInternet) }
         await store.connect(repository("b"))

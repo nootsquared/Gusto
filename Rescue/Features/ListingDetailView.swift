@@ -126,7 +126,7 @@ struct ListingDetailView: View {
                             PrimaryButton(title: "No longer available", disabled: true) {}
                         } else if store.cart.contains(id) {
                             HStack {
-                                Label("Reserved for this demo", systemImage: "checkmark")
+                                Label("In your cart", systemImage: "checkmark")
                                     .rescueFont(14, .semibold).foregroundStyle(Theme.deep)
                                 Spacer()
                                 Button("View cart") { router.sheet = .cart }.rescueFont(
@@ -135,9 +135,9 @@ struct ListingDetailView: View {
                             }
                         } else {
                             PrimaryButton(
-                                title: "Reserve · \(Money.text(item.price))",
-                                disabled: store.runActive, id: "reserve"
-                            ) { if store.reserve(id) { Haptic.success() } }
+                                title: "Add to cart · \(Money.text(item.price))",
+                                disabled: store.runActive || store.backendBusy, id: "add-to-cart"
+                            ) { if store.addToCart(id) { Haptic.success() } }
                         }
                     }
                 }

@@ -19,6 +19,27 @@ assert.equal((await api(other,'messages',{resourceId:'demo-buyer:maya'})).error,
 assert.equal((await api(buyer,'detail',{resourceId:'straw'})).data.privateLocation,undefined);
 await assert.rejects(()=>call(buyer,'configureLocal',[true]));
 console.log('PASS: sender authorization, private SQL, conversation isolation, owner-only configuration');
+// Saving a cart must not hold inventory or start seller coordination.
+for(const token of [buyer,other]){
+  await good(token,'add_cart',{resourceId:'straw',operationId:op()});
+  await good(token,'add_cart',{resourceId:'straw',operationId:op()});
+  const saved=await good(token,'bootstrap');
+  assert.equal(saved.cart.filter(id=>id==='straw').length,1);
+  assert.equal(saved.reservations.length,0);
+  assert.equal(saved.run,null);
+}
+// Confirmation claims inventory; a competing cart stays saved and cannot partly reserve.
+await good(buyer,'release',{resourceId:'straw',operationId:op()});
+await good(buyer,'add_cart',{resourceId:'yog',operationId:op()});
+await good(buyer,'add_cart',{resourceId:'straw',operationId:op()});
+await good(other,'plan',{text:'Fastest',operationId:op()});
+assert.equal((await good(other,'bootstrap')).reservations.length,1);
+assert.equal((await api(buyer,'plan',{text:'Fastest',operationId:op()})).error,'unavailable');
+assert.equal((await good(buyer,'bootstrap')).reservations.length,0);
+for(const token of [buyer,other]) await good(token,'release',{resourceId:'straw',operationId:op()});
+await good(buyer,'release',{resourceId:'yog',operationId:op()});
+console.log('PASS: saved carts have no holds, confirmation reserves, and failed confirmation rolls back');
+
 // Different operation IDs compete for the same inventory claim.
 const race=await Promise.all([api(buyer,'reserve',{resourceId:'straw',operationId:op()}),api(other,'reserve',{resourceId:'straw',operationId:op()})]);
 assert.equal(race.filter(r=>r.error==='').length,1);assert.equal(race.filter(r=>r.error==='unavailable').length,1);
