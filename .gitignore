@@ -7,4 +7,5 @@ xcuserdata/
 *.xcresult
 work/
 
+*.gemini-key
 GustoDatabase/.gemini-key
