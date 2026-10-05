@@ -1,0 +1,200 @@
+import SwiftUI
+
+struct ListingDetailView: View {
+    @Environment(AppStore.self) private var store
+    @Environment(AppRouter.self) private var router
+    let id: String
+    @State private var expanded = false
+    @State private var sellerExpanded = false
+    var body: some View {
+        if let item = store.listing(id) {
+            let seller = store.seller(item.sellerID)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    FoodPhoto(name: item.image).frame(height: expanded ? 300 : 230)
+                        .overlay(alignment: .topLeading) {
+                            FreshnessBadge(freshness: item.freshness, solid: true)
+                                .padding(.leading, 16).padding(.trailing, 72).padding(.top, 16)
+                        }
+                        .overlay(alignment: .topTrailing) {
+                            Button {
+                                store.toggleSaved(id)
+                            } label: {
+                                Image(
+                                    systemName: store.savedIDs.contains(id) ? "heart.fill" : "heart"
+                                ).foregroundStyle(
+                                    store.savedIDs.contains(id) ? Theme.coral : Theme.ink)
+                            }
+                            .buttonStyle(.bordered).buttonBorderShape(.circle).tint(Theme.paper)
+                            .padding(14).accessibilityLabel("Save listing")
+                        }
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text(item.name).gustoFont(26, .semibold).accessibilityIdentifier(
+                            "listing-title")
+                        PriceLabel(item: item, size: 34)
+                        if let conditions = item.storageConditions {
+                            VStack(alignment: .leading, spacing: 7) {
+                                Label(
+                                    "Recorded by storage sensor",
+                                    systemImage: "sensor.tag.radiowaves.forward"
+                                )
+                                .gustoFont(13, .semibold).foregroundStyle(Theme.save)
+                                Text(
+                                    "\(conditions.temperature, specifier: "%.1f")°C · \(conditions.humidity, specifier: "%.0f")% humidity"
+                                )
+                                .gustoFont(15, .semibold)
+                                if let light = conditions.light {
+                                    Text(
+                                        "\(light, specifier: "%.0f") \(conditions.lightUnit == "lux" ? "lux" : "raw light")"
+                                    )
+                                    .gustoFont(12).foregroundStyle(Theme.secondary)
+                                }
+                                Text(
+                                    "\(conditions.sampleCount) readings · \(Date(timeIntervalSince1970: conditions.from / 1000).formatted(date: .abbreviated, time: .shortened)) – \(Date(timeIntervalSince1970: conditions.until / 1000).formatted(date: .abbreviated, time: .shortened))"
+                                )
+                                .gustoFont(11).foregroundStyle(Theme.secondary)
+                                Text("Average conditions during the recording period.")
+                                    .gustoFont(12).foregroundStyle(Theme.secondary)
+                            }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Theme.soft, in: RoundedRectangle(cornerRadius: 16))
+                        }
+                        Text("You save \(Money.text(item.savings))").gustoFont(15, .medium)
+                            .foregroundStyle(Theme.save)
+                        Label(
+                            "\(String(format: "%.1f", item.distance)) mi · \(seller.area) · \(item.pickup)",
+                            systemImage: "mappin.and.ellipse"
+                        ).gustoFont(14).foregroundStyle(Theme.secondary)
+                        VStack(alignment: .leading, spacing: 12) {
+                            Button {
+                                withAnimation(Theme.spring) { sellerExpanded.toggle() }
+                            } label: {
+                                HStack {
+                                    SellerRow(seller: seller)
+                                    Image(
+                                        systemName: sellerExpanded ? "chevron.up" : "chevron.down")
+                                }
+                            }.buttonStyle(.plain)
+                            if sellerExpanded {
+                                Divider()
+                                Label(
+                                    seller.student
+                                        ? "Identity & student verified" : "Identity verified",
+                                    systemImage: "checkmark.seal.fill"
+                                ).gustoFont(13).foregroundStyle(Theme.sage)
+                                Button("Message \(seller.firstName)") { router.chat(seller.id) }
+                                    .gustoFont(14, .semibold)
+                            }
+                        }.padding(12).card(radius: 18)
+                        freshnessCallout(item, seller: seller)
+                        Button {
+                            withAnimation(Theme.spring) { expanded.toggle() }
+                        } label: {
+                            Label(
+                                expanded ? "Hide details" : "Storage, allergens & receipt",
+                                systemImage: expanded ? "chevron.up" : "chevron.down"
+                            ).gustoFont(13, .medium).frame(maxWidth: .infinity).padding(
+                                .vertical, 8)
+                        }.buttonStyle(.plain).foregroundStyle(Theme.secondary)
+                        if expanded {
+                            Text("DETAILS").gustoFont(13, .semibold).foregroundStyle(Theme.muted)
+                                .padding(.top, 10)
+                            VStack(spacing: 0) {
+                                detail("Quantity", item.quantity, "shippingbox")
+                                detail(
+                                    "Condition",
+                                    item.opened ? "Opened, sealed storage" : "Unopened",
+                                    "shippingbox")
+                                detail("Storage", item.storage, "snowflake")
+                                detail("Allergens", item.allergens, "exclamationmark.circle")
+                                detail(
+                                    item.prepared ? "Prepared" : "Purchased", item.purchased,
+                                    "calendar")
+                                detail(
+                                    "Receipt", item.receipt ? "Verified" : "Not provided",
+                                    "receipt", last: true)
+                            }.padding(.horizontal, 14).card(radius: 18)
+                            Text(
+                                "Freshness is seller-reported and photo-assisted. Always use your judgment at pickup."
+                            ).gustoFont(12).foregroundStyle(Theme.muted)
+                            Label(
+                                "Keeps \(String(format: "%.1f", item.weight)) lb of food in use. \(seller.firstName) has shared \(seller.pickups) items.",
+                                systemImage: "leaf"
+                            ).gustoFont(14).padding(16).background(
+                                Theme.butterSoft, in: RoundedRectangle(cornerRadius: 18))
+                        }
+                    }.padding(20)
+                }
+            }.navigationBarTitleDisplayMode(.inline)
+                .safeAreaInset(edge: .bottom) {
+                    BottomAction {
+                        if !item.available {
+                            PrimaryButton(title: "No longer available", disabled: true) {}
+                        } else if store.cart.contains(id) {
+                            HStack {
+                                Label("In your cart", systemImage: "checkmark")
+                                    .gustoFont(14, .semibold).foregroundStyle(Theme.deep)
+                                Spacer()
+                                Button("View cart") { router.sheet = .cart }.gustoFont(
+                                    15, .semibold
+                                ).accessibilityIdentifier("view-cart")
+                            }
+                        } else {
+                            PrimaryButton(
+                                title: "Add to cart · \(Money.text(item.price))",
+                                disabled: store.runActive || store.backendBusy
+                                    || item.sellerID == store.accountID, id: "add-to-cart"
+                            ) { if store.addToCart(id) { Haptic.success() } }
+                        }
+                    }
+                }
+        } else {
+            EmptyState(title: "Listing unavailable", message: "Try another item nearby.")
+        }
+    }
+    private func freshnessCallout(_ item: Listing, seller: Seller) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Image(systemName: item.stale ? "exclamationmark.circle" : "checkmark.shield")
+                    .foregroundStyle(item.stale ? Theme.apricot : Theme.sage)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Photo updated").gustoFont(14, .semibold)
+                    Text(ListingTimestamp.display(item.updated))
+                        .gustoFont(13).foregroundStyle(Theme.secondary)
+                    Text(item.stale ? "Want a current look?" : "Seller reconfirmed condition")
+                        .gustoFont(13).foregroundStyle(Theme.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            if store.checkingIDs.contains(id) {
+                HStack {
+                    ProgressView()
+                    Text("Asked \(seller.firstName) to reconfirm").gustoFont(13)
+                }
+            } else {
+                Button {
+                    Task {
+                        await store.freshCheck(id)
+                        Haptic.success()
+                    }
+                } label: {
+                    Label("Request Fresh Check", systemImage: "camera").gustoFont(13, .semibold)
+                }.buttonStyle(.bordered).buttonBorderShape(.capsule).accessibilityIdentifier(
+                    "fresh-check")
+            }
+        }.padding(16).background(
+            item.stale ? Theme.apricotSoft : Theme.soft, in: RoundedRectangle(cornerRadius: 18))
+    }
+    private func detail(_ label: String, _ value: String, _ icon: String, last: Bool = false)
+        -> some View
+    {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: icon).foregroundStyle(Theme.muted)
+                Text(label).foregroundStyle(Theme.secondary)
+                Spacer(minLength: 8)
+                Text(value).fontWeight(.medium).multilineTextAlignment(.trailing)
+            }.gustoFont(14).padding(.vertical, 12)
+            if !last { Divider().overlay(Theme.line) }
+        }
+    }
+}

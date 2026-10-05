@@ -1,125 +1,131 @@
-# Gusto — native iPhone demo
+<p align="center">
+  <img src="docs/readme/gusto-banner.svg" alt="Gusto. Good food. Better prices." width="100%">
+</p>
 
-SwiftUI iPhone app for rescuing food, iOS 17+. Normal launches select the Maincloud database
-`mhacks-pranav-dev-975fp`. Sign in through SpacetimeAuth using Google. First sign-in
-creates a server-authorized profile; returning users retain the same account.
-Scans save to private cloud inventory; **Sell this item → List on Gusto** publishes them for
-other signed-in users. Foreground browsing refreshes all marketplace pages about every ten
-seconds, and pulling down refreshes immediately. Discover shows recommendation rows only with default filters and no search. Search or any active filter switches to a two-column results gallery with paginated matching food; clearing filters restores recommendations. Nearby starts at 3 miles; filters and the map
-viewport determine which published items appear. Both phones must use a normal cloud build,
-not `--uitesting` fixtures or `--local-backend` accounts.
-Incoming messages and pickup/Fresh Check updates refresh every three seconds while the app is
-in the foreground. They update inbox previews, move the conversation to the top, and show a
-Messages unread badge and a dismissible banner, including over open item/cart panels. Opening
-a conversation marks received messages read. These are in-app notifications, not background
-push notifications. A cart addition stays private until the buyer requests pickup.
-When selling a scan, enter the optional original price and food weight to populate savings and
-pounds in the buyer's cart and pickup plan. Missing values are not inferred from a photo.
-Debug launches with `--local-backend` use the local SpacetimeDB backend with separate
-accounts, authorized reservations, persistent messaging, seller publishing,
-pickup/payment simulation, and receipt-derived impact. Browsing survives temporary disconnection
-through account-scoped caches. Camera, AI, cloud uploads, actual payments,
-push remain future providers. Pickup routes use Apple Maps from your selected location, with
-road directions available through Apple Maps. Plans choose an order automatically; you can move
-stops before sending requests. Sellers confirm requests in Messages before buyers start pickups.
-Seed sellers are sample accounts and cannot reply. Actual payment processing remains unconfigured.
+<p align="center">
+  <strong>Find something good. Give it another chance.</strong><br>
+  A neighborhood food marketplace with photo scanning, connected storage, and pickups that fit your day.
+</p>
 
-Google account pictures appear in You and the tab bar when SpacetimeAuth provides a photo.
-An expired session keeps the account and current screen. Token renewal clears reconnect prompts; transient failures never sign you out.
+<p align="center">
+  <a href="#the-experience">The experience</a> &nbsp;·&nbsp;
+  <a href="#under-the-hood">The stack</a> &nbsp;·&nbsp;
+  <a href="#built-with-care">The engineering</a> &nbsp;·&nbsp;
+  <a href="#a-closer-look">Explore the project</a>
+</p>
 
-Gemini scanning, reviewed collection-to-sale publishing and sensor-linked quality estimates are
-implemented; see [Gemini scan setup](docs/GEMINI_SCAN_SETUP.md) for server-key configuration and
-the two-phone demo. The shared backend is deployed with Gemini configured; local core, backend, Simulator and iPhone build checks passed.
+<br>
 
-Start the four local development processes in [MHacksDB/README.md](MHacksDB/README.md),
-then run the app in Simulator with the `--local-backend` launch argument.
-`--fixture` selects the original bundled-photo offline demo;
-`--uitesting` selects fixture mode unless `--backend` is also supplied. Backend failures show an
-honest offline state and never silently substitute fixture records. Debug account switching is
-in You → Settings and selects provisioned Keychain sessions.
-## Run in Simulator
+Good food gets left behind. A few extra groceries, produce you won't finish, something worth sharing. Gusto connects that food with someone nearby who wants it, at a price that makes the pickup worth taking.
 
-1. Open `Rescue.xcodeproj` in Xcode 16.4 or later.
-2. Select the **Rescue** scheme and an iPhone Simulator.
-3. Run (⌘R). If a runtime is missing, install an iOS runtime in Xcode Settings → Components.
-4. Tap Find food nearby on first launch. Subsequent launches start on Discover.
+The whole exchange lives in one native iPhone app: discover a listing, talk to the seller, plan your stops, check the food at pickup, and see what you saved. On the other side, turn a photo into a private collection item, track its storage conditions, and list it when you're ready.
 
-## Run on a physical iPhone
+## The experience
 
-1. Connect the iPhone and select it as the run destination.
-2. In target Rescue → Signing & Capabilities, select your development team. Automatic signing is enabled; use a unique bundle ID if Xcode asks.
-3. Enable Developer Mode on the iPhone if required, trust your development certificate when prompted, and run.
+<table>
+  <tr>
+    <td align="center" width="33%"><img src="docs/screenshots/discover.png" alt="Food discovery with photography, prices, savings, and nearby listings" width="230"></td>
+    <td align="center" width="33%"><img src="docs/screenshots/map.png" alt="Neighborhood food map with price pins and a selected listing" width="230"></td>
+    <td align="center" width="33%"><img src="docs/screenshots/pickup-plan.png" alt="Pickup plan with grouped sellers, route preferences, and a stop timeline" width="230"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Find your next good deal</strong></td>
+    <td align="center"><strong>See what's around you</strong></td>
+    <td align="center"><strong>Make one trip count</strong></td>
+  </tr>
+</table>
 
-Physical-device signing/install requires your Apple account and connected hardware. An unsigned device build validates compilation, not a signed installation. The app contains no Apple Pay, push, camera, or location entitlement to configure.
+<p align="center"><sub>Original design previews. The current app adds the Scan tab, cloud accounts, and connected storage.</sub></p>
 
-## Fixture-mode hackathon demo
+### A better way to browse nearby
 
-1. Discover → Organic Strawberries → Reserve. Close the sheet.
-2. Add Greek Yogurt from Buy again, then use Search for Sourdough Loaf and Rigatoni. Reserve both. The default 3mi distance filter includes all four. Filters next to Search combines budget, pickup time, freshness and preferences in one sheet.
-3. Cart shows **4 items, 4 sellers, $7.75 to pay, $14.63 saved, 6.1 lb**. These figures come from the source fixtures.
-4. Plan My Pickups → choose a route preference → Coordinate All.
-5. Accept Nina's later pickup time (or Alternative). Downstream stop times update.
-6. Start pickups → tap the Next seller card → Simulate arrival → I'm Here → Looks good → Pay.
-7. After Picked up, tap Next pickup. Repeat for the remaining sellers. At the last stop, tap See your impact.
-8. Done enters You with updated impact. Purchases & Sales shows local demo receipts.
+Discover brings together food photography, prices, savings, and distance in a feed built for browsing. Explore recommendations, recent listings, snacks, and deals, or search for exactly what you need.
 
-Payment buttons simulate payment and never charge money. Photos in pickup verification are clearly marked as reference photos. Report issue skips a seller without adding a receipt or impact. Fixture-mode reservations last for the demo session. Backend-mode reservations use an exclusive, server-controlled 30-minute hold; confirmed bookings last through the agreed pickup window plus 15 minutes.
+- **Find your fit.** Combine category, budget, distance, pickup time, freshness, and food preferences. Search and active filters switch the feed into a focused results gallery.
+- **Shop the neighborhood.** Browse Apple Maps price pins, seller clusters, and a synchronized listing carousel. Move the map and search that area.
+- **Choose your starting point.** Use your current location or search for a city, neighborhood, or address. Nearby results and distances follow your choice.
+- **Keep your favorites close.** Save listings and follow sellers, with preferences attached to your account.
 
-Other flows: Map price pins and carousel, search and filters, Fresh Check, editable chat and quick replies, mock photo scan → listing review → local listing, saved items, impact charts, alerts, and native invitation sharing.
+### From a photo to your food collection
 
-**Offline demo:** all 26 source photos are bundled. The marketplace uses interactive Apple Maps with seller clustering, selected/GPS location centering, and cloud searches for the visible area. Map tiles need internet. Pickup route previews retain an offline demo map; You → Settings → Live maps for pickup routes enables Apple map tiles for those previews. In fixture mode, Settings → Reset demo restores fixtures. In backend mode, Clear device cache and refresh only clears this device and never resets shared server data.
+Take a photo or choose one from your library. Gemini suggests the food, variety, category, visible condition, quantity, and storage information. Review and edit the details before saving; confident food bounds offer a tighter crop, with the full photo always recoverable.
 
-## Tests and development
+Your collection stays private. Scanning an item doesn't list it for sale. When you're ready, **Sell this item** carries its photo and reviewed details into a listing editor. Add a price, allergens, pickup location, and availability, then publish to the shared marketplace. Manual entry is available when analysis can't complete.
 
-The TypeScript backend lives in `MHacksDB/`. Its isolated integration suite tests
-sender authorization, privacy, reservation races/expiry, message retry deduplication, publishing,
-seller handoff, trusted payment completion, immutable history, and non-destructive republishing.
-See [API contracts](docs/backend/CONTRACT.md) and [testing](docs/TESTING.md).
-```sh
-swift test
-python3 Scripts/generate_project.py  # after adding/moving Swift files
-xcrun swift-format format -i -r Sources Rescue Tests Package.swift Scripts/generate_icon.swift
-./Scripts/test.sh                   # core + iPhone Simulator tests
-```
+### Storage you can actually see
 
-Xcode: ⌘U runs unit and UI tests. See `docs/TESTING.md` for precise commands, coverage, screenshots, and environment requirements. The `--uitesting` launch argument skips onboarding and shortens mock delays without pre-filling the cart or bypassing the product flow.
+Connect an **Arduino Nano 33 BLE Sense Rev2** to Gusto over Bluetooth and watch temperature, relative humidity, and raw ambient-light readings update in the storage dashboard. A companion **FREE-WILi** display shows the same measurements and controls Bluetooth discovery.
 
-## Documentation index
+Link collection items to the sensor to record private storage history. Recent temperature and humidity readings support a provisional remaining-quality estimate; published items can carry a summary of their recorded storage conditions.
 
-- `AGENTS.md`: concise file map and constraints; start here for targeted changes.
-- `DESIGN.md`: source typography, tokens, patterns, states, native adaptations.
-- `ARCHITECTURE.md`: ownership, invariants, lifecycle, mock boundaries, extension paths.
-- `docs/TESTING.md`: test and build verification.
-- `docs/ASSETS.json`: exact photo URLs and local asset availability.
+Missing or stale readings are shown honestly. Quality estimates are experimental and uncalibrated; they do not establish a food-safety expiration date.
 
-This repository is intentionally left uncommitted. The user handles Git commits and pushes.
+### Conversations that stay with the food
 
-The visible app name is Gusto. Existing Rescue target names, bundle ID, OAuth callback, and Keychain identifiers are retained for connection and session compatibility.
+Seller chats keep the relevant listing pinned, so the item and the conversation stay together. Ask a question, use a quick reply, coordinate a pickup window, or request a **Fresh Check** so the seller can reconfirm the item's condition.
 
-Tap the location below the Discover heading to use foreground GPS or search for a city, neighborhood, or address. Gusto requests When In Use permission on the first connected launch; manual choices persist on the device. Distances and nearby filters use the chosen coordinates. Sample seller locations remain fictional Ann Arbor locations.
+Incoming messages and pickup updates refresh while the app is open. Inbox previews, unread badges, and dismissible banners surface activity, including while you're viewing a listing or cart. Returning from chat takes you back to the flow you came from.
 
-Discover search is inline: type into the top field to show matching food on the same scrollable page. Empty search shows available categories, not seeded search history; Cancel returns to the discovery feed.
+### Several sellers. One pickup plan.
 
-On Map, Choose location opens a dropdown for GPS or live Apple Maps address/place matches. Selecting a match centers the map and adds a green location pin; the choice is saved on this device. No additional address service or database setup is required.
+Add food to your cart while you browse. Nothing is held and no seller is contacted until you explicitly confirm the plan.
 
-Adding food to your cart saves it without reserving inventory or contacting sellers. In the cart, **Confirm & plan pickups** starts the inventory holds and creates a plan; contacting sellers is a separate next step. Saved items may become unavailable before confirmation.
+Gusto groups items by seller and offers **Fastest**, **Shortest**, and **Best timing** route preferences. Review the stop order, adjust it before sending requests, and coordinate with sellers through Messages. An agreed time change shifts later stops so the timeline stays useful.
 
-## Scan and private food collection
+Once sellers confirm, your pickup trip is accessible from Discover, the cart, and seller chat. Apple Maps provides road directions. Arrival, seller handoff, food review, and demo payment form a guided sequence at each stop. You can report an issue or cancel pickup requests, with server rules protecting reservations and completion.
 
-The middle tab is **Scan**. Capture a camera photo or choose one through Apple's photo picker, review Gemini's food, variety, visible condition and quantity suggestions, and save a private inventory item. Confident food bounds offer a crop with a full-photo restore option. Analysis runs through the authenticated server; no Gemini key is bundled in the app. Manual entry remains available if analysis fails.
+### See what each pickup adds up to
 
-Items and compressed JPEGs persist in private Maincloud `food_inventory` records. This prototype limits each account to 50 items and each image to 65 KB; a production photo pipeline should use your Google Cloud Storage bucket. Only explicit **Sell this item** publishes its photo and creates a marketplace listing after price, allergens, a selected map address, pickup dates. Listings have no repeated safety checklist or certification badges. The app never calls AI output verified. Pickup location defaults to a recent precise location or your saved choice; use current location or select a live address match as you type. The pickup pin uses your selected coordinates. Tracked items attach recorded storage averages to their listing.
+Finished trips show the items collected, seller totals, money saved, and food weight. Your profile brings together purchase and sales history, earnings, and monthly impact charts.
 
-Scan → Storage sensor connects to the Nano `MHacks Climate` service using the exact UUIDs and 17-byte binary protocol in [Developer/BLE_PROTOCOL.md](Developer/BLE_PROTOCOL.md). Hold FREE-WILi blue for two seconds, tap Find a device, select MHacks Climate, and allow Bluetooth access. The app reads the current characteristic and subscribes to once-per-second notifications. Its live dashboard displays °F (with °C), % relative humidity, and raw APDS9960 clear-channel counts. Missing validity bits display dashes; after five seconds without a new sample all readings are hidden as stale. Disconnect stops monitoring; closing the panel leaves the foreground connection active. A physical iPhone is required for the radio check; the Simulator shows an explicit device requirement.
+Totals come from completed receipts and the listing data behind them. Skipped pickups don't count, and missing original prices or weights aren't guessed. The result is a record of what you actually completed.
 
-Tick **Track with sensor** on a collection item to record valid BLE history privately about once a minute. Temperature is converted to Celsius; raw light counts remain explicitly raw and are never mixed with lux. Recent temperature/humidity history supports a provisional remaining-quality estimate. Background recording depends on iOS notification delivery and a connected sensor. See [physical iPhone setup and other-phone installation](docs/IPHONE_SENSOR_SETUP.md).
+### Made for the iPhone
 
-The remaining-quality model is uncalibrated and does not establish a food-safety expiration date. See [Gemini scan setup](docs/GEMINI_SCAN_SETUP.md) for its assumptions. Without a sensor, scanning and selling still work, with no fabricated tracking values.
+Ivory surfaces, deep sage, butter accents, generous photography, and rounded typography give Gusto its visual identity. Native tabs, sheets, photo picking, maps, sharing, and haptics carry it through the app. Dynamic Type, VoiceOver, Reduce Motion, and generous touch targets are part of the design.
 
-Confirmed pickups move out of the shopping cart into the active pickup trip, which can also be
-opened from the seller chat. Buyers use Directions and “I'm here”; sellers confirm the handoff
-before buyers review the food and complete a clearly labeled demo payment. No money is charged.
-The finished trip shows its items, seller totals, savings and food weight.
-Scan review labels its category, condition and storage menus. Unknown varieties are omitted from
-food names. Current-location pickup keeps the phone GPS coordinates; a street address is optional,
-and country-only geocoding falls back to “Current location · dropped pin.”
+## Under the hood
+
+| Layer | Technology | What it does |
+| :--- | :--- | :--- |
+| iPhone app | **Swift, SwiftUI, iOS 17+** | Native screens, navigation, sheets, and interaction; no third-party Swift packages |
+| Product state | **Observation, Swift Concurrency, GustoCore** | Shared observable state, async work, pickup planning, money, and guarded transitions |
+| Maps and location | **MapKit, Core Location** | Nearby discovery, address search, seller pins, and road directions |
+| Accounts | **SpacetimeAuth, Google sign-in, Keychain** | OAuth with PKCE, authenticated profiles, protected sessions, and token renewal |
+| Shared backend | **TypeScript, SpacetimeDB on Maincloud** | Private tables, authenticated HTTP procedures, marketplace search, reservations, messages, and receipts |
+| Photo analysis | **Google Gemini** | Structured food suggestions and crop bounds through an authenticated server call |
+| Connected storage | **Core Bluetooth, Arduino, FREE-WILi** | Live sensor notifications, item-linked history, and a companion hardware display |
+| Data and charts | **URLSession, actor-backed caches, Swift Charts** | Cloud transport, account-scoped cached data, retryable messages, and receipt-based impact |
+| Verification | **Swift Package tests, XCTest, XCUITest, TypeScript integration tests** | Core rules, Simulator flows, backend access controls, and transaction behavior |
+
+The app talks to authenticated backend procedures through its Swift repository layer. Gemini runs behind the server, with its key kept out of the iPhone app. Sensor readings arrive over Bluetooth and are saved as private, item-linked history. Marketplace and conversation updates use foreground HTTP polling.
+
+## Built with care
+
+- **Private until you publish.** Food scans and sensor history belong to your account. Publishing is a separate, explicit action.
+- **Reservations that hold up.** Cart confirmation creates server-controlled inventory holds. Conflicting claims, expiry, cancellations, and seller confirmations are checked on the backend.
+- **Completion that happens once.** Pickup phases are guarded and payment retries are deduplicated, preventing repeated taps from creating extra receipts.
+- **Accounts kept separate.** Sessions, cached data, and pending work are scoped to the account and environment. Switching accounts clears the previous user's active state.
+- **A flow that keeps its place.** One shared product store and one root sheet host keep listings, cart, pickup plans, and chat in context.
+
+## What's connected today
+
+Gusto is a working prototype with cloud accounts, shared listings, Gemini scanning, private inventory, messaging, pickup coordination, and Bluetooth sensor integration. A separate fixture mode provides a repeatable offline walkthrough with bundled photos and local replies.
+
+**Payments are simulated and never charge money.** Notifications arrive in the foreground; background push delivery is not connected. The sample catalog includes fictional sellers and locations. Sensor estimates describe provisional quality, and buyers review the food at handoff.
+
+## A closer look
+
+| Explore | Read |
+| :--- | :--- |
+| Visual identity and native interaction | [Design](DESIGN.md) |
+| State ownership, data flow, and product rules | [Architecture](ARCHITECTURE.md) |
+| Backend procedures and account boundaries | [API contract](docs/backend/CONTRACT.md) |
+| Photo analysis and collection-to-sale flow | [Gemini scanning](docs/GEMINI_SCAN_SETUP.md) |
+| Climate hardware and Bluetooth protocol | [Hardware](GustoHardware/README.md) · [BLE protocol](GustoHardware/BLE_PROTOCOL.md) |
+| Test coverage and validation | [Testing](docs/TESTING.md) |
+| Device installation and local development | [iPhone guide](docs/IPHONE_SENSOR_SETUP.md) · [Backend guide](GustoDatabase/README.md) |
+
+<br>
+
+<p align="center"><strong>Good food. Better prices. More on your table.</strong></p>

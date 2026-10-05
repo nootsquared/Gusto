@@ -1,0 +1,25 @@
+{
+  "name": "gusto-database",
+  "private": true,
+  "version": "0.1.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "setup": "npm --prefix spacetimedb ci",
+    "start": "spacetime start --listen-addr 127.0.0.1:3000 --data-dir .spacetime/rescue-server --non-interactive",
+    "typecheck": "npm --prefix spacetimedb run typecheck",
+    "build": "spacetime build --module-path ./spacetimedb",
+    "publish": "spacetime publish --delete-data=never",
+    "publish:cloud": "spacetime publish mhacks-pranav-dev-975fp --server https://maincloud.spacetimedb.com --module-path ./spacetimedb --delete-data=never",
+    "seed:cloud": "spacetime call mhacks-pranav-dev-975fp seed_cloud_catalog --server https://maincloud.spacetimedb.com --no-config --yes",
+    "logs:cloud": "spacetime logs mhacks-pranav-dev-975fp --server https://maincloud.spacetimedb.com",
+    "logs": "spacetime logs",
+    "test": "npm run typecheck && node scripts/auth-test.mjs && node scripts/test.mjs",
+    "provision": "node scripts/provision.mjs",
+    "media": "node scripts/media-server.mjs",
+    "simulate": "node scripts/simulator.mjs",
+    "load-test": "GUSTO_SEED_COUNT=2000 node scripts/test.mjs"
+  },
+  "description": "Authenticated marketplace, food inventory, and pickup coordination for Gusto."
+}

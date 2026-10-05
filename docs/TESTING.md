@@ -95,29 +95,29 @@ HTTP serialization, account cache/outbox isolation, offline launch, retry IDs, p
 metadata budget, and arbitrary seller/location planning. Existing fixture UI flows are retained.
 
 ```sh
-cd MHacksDB
+cd GustoDatabase
 npm test
 npm run load-test
 ```
 
-Both commands create an isolated `rescue-test-*` database, seed it through owner-only tooling,
+Both commands create an isolated `gusto-test-*` database, seed it through owner-only tooling,
 exercise authenticated APIs, and republish with `--delete-data=never`. They leave records intact
 for inspection. The load test uses 2,000 packages and checks continuation after 500 candidates.
 
 Connected Simulator tests explicitly use `--local-backend`; normal app launches select
 Maincloud and show real sign-in when no cloud session is present.
 Connected Simulator flows require the database, media and separate simulator processes from
-MHacksDB/README.md. Simulator builds need ad-hoc signing for Keychain access; an unsigned
+GustoDatabase/README.md. Simulator builds need ad-hoc signing for Keychain access; an unsigned
 Simulator app cannot store sessions. No development-team enrollment is required for local signing.
 
 ```sh
-TEST_RUNNER_RESCUE_CONNECTED_TESTS=1 xcodebuild -project Rescue.xcodeproj -scheme Rescue \
+TEST_RUNNER_GUSTO_CONNECTED_TESTS=1 xcodebuild -project Gusto.xcodeproj -scheme Gusto \
   -destination 'platform=iOS Simulator,name=iPhone 16' -derivedDataPath work/DerivedData \
   -parallel-testing-enabled NO \
-  -only-testing:RescueUITests/RescueUITests/testConnectedSellerPublishesBuyerReservesAndPays \
+  -only-testing:GustoUITests/GustoUITests/testConnectedSellerPublishesBuyerReservesAndPays \
   CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- test
 
-RESCUE_LIVE_BACKEND=1 swift test --scratch-path work/swift-build \
+GUSTO_LIVE_BACKEND=1 swift test --scratch-path work/swift-build \
   --filter BackendTests/testLiveSwiftBootstrap
 ```
 
@@ -151,10 +151,10 @@ From the repository root:
 This runs the shared core suite on macOS, then both hosted iOS unit tests and UI tests on the first available iPhone Simulator. To choose a specific device:
 
 ```sh
-RESCUE_SIMULATOR_ID=<simulator-UDID> ./Scripts/test.sh
+GUSTO_SIMULATOR_ID=<simulator-UDID> ./Scripts/test.sh
 ```
 
-Get IDs with `xcrun simctl list devices available`. Each run produces a timestamped `work/RescueTests-*.xcresult`. Open the result in Xcode to inspect failures, screenshots, and recorded UI actions. `work/` is ignored by Git. Tests launch the actual app with `--uitesting`: onboarding is skipped and mock delays are 50ms; cart, confirmations, handoff and payment still go through the normal product flow.
+Get IDs with `xcrun simctl list devices available`. Each run produces a timestamped `work/GustoTests-*.xcresult`. Open the result in Xcode to inspect failures, screenshots, and recorded UI actions. `work/` is ignored by Git. Tests launch the actual app with `--uitesting`: onboarding is skipped and mock delays are 50ms; cart, confirmations, handoff and payment still go through the normal product flow.
 
 ## Targeted checks
 
@@ -167,17 +167,17 @@ swift test --scratch-path work/swift-build
 One UI test (include target, class, and method):
 
 ```sh
-xcodebuild -project Rescue.xcodeproj -scheme Rescue \
+xcodebuild -project Gusto.xcodeproj -scheme Gusto \
   -destination 'platform=iOS Simulator,name=iPhone 16' \
   -derivedDataPath work/DerivedData -parallel-testing-enabled NO \
-  -only-testing:RescueUITests/RescueUITests/testDiscoverToFourSellerPickupAndImpact \
+  -only-testing:GustoUITests/GustoUITests/testDiscoverToFourSellerPickupAndImpact \
   CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- test
 ```
 
 Unsigned device compilation:
 
 ```sh
-xcodebuild -project Rescue.xcodeproj -scheme Rescue -configuration Release \
+xcodebuild -project Gusto.xcodeproj -scheme Gusto -configuration Release \
   -destination 'generic/platform=iOS' -derivedDataPath work/DeviceBuild \
   CODE_SIGNING_ALLOWED=NO build
 ```
@@ -215,7 +215,7 @@ Export attachments for local inspection:
 
 ```sh
 xcrun xcresulttool export attachments \
-  --path work/RescueTests-<timestamp>.xcresult --output-path work/screenshots
+  --path work/GustoTests-<timestamp>.xcresult --output-path work/screenshots
 ```
 
 The generated manifest maps file names to Discover, listing, cart, pickup plan, coordinated plan, arrival, verification, payment, completed impact, filters/map and published-listing screenshots. Compare them with the visual contract in `DESIGN.md`. Allow UIKit's presentation transition to settle before taking a screenshot.
@@ -229,9 +229,9 @@ Automated coverage includes the local backend and Simulator integration. Live Ma
 `OAuthTests` checks the RFC 7636 PKCE vector, callback state/destination/duplicate guards,
 and token response issuer/project/audience/nonce/expiry binding. BackendTests verifies
 refreshed-token transport, rejects a cross-account session provider, and clears visible
-private data on sign-out. `MHacksDB/scripts/auth-test.mjs` tests registration claim restrictions.
+private data on sign-out. `GustoDatabase/scripts/auth-test.mjs` tests registration claim restrictions.
 The cloud `register_profile` endpoint rejects forged and non-app administrative tokens.
-`RescueUITests/testCloudLaunchRequiresSignIn` verifies the cloud sign-in screen without
+`GustoUITests/testCloudLaunchRequiresSignIn` verifies the cloud sign-in screen without
 using local demo credentials. Run on a Simulator with no saved cloud session.
 
 A real Google login is a manual verification: sign in, confirm one `users` and
@@ -290,7 +290,7 @@ Logs: `/tmp/gusto-ble-core.log`, `/tmp/gusto-ble-ui.log`, `/tmp/gusto-ble-ui-fin
 
 The actual Gusto-to-Nano radio path still requires a physical iPhone test using
 [IPHONE_SENSOR_SETUP.md](IPHONE_SENSOR_SETUP.md). Existing firmware/LightBlue verification
-in `Developer/BLE_PROTOCOL.md` does not substitute for testing this new app adapter.
+in `GustoHardware/BLE_PROTOCOL.md` does not substitute for testing this new app adapter.
 
 October 4 pickup/discovery fixes: 48 core tests passed (one opt-in backend test skipped),
 backend typecheck and isolated-server integration passed. The integration exercises selected-origin
@@ -335,3 +335,22 @@ Signed iPhone build passed; cloud deployed without deleting data and updated app
 Logs: `/tmp/gusto-pickup-cancel-core.log`, `/tmp/gusto-pickup-cancel-backend.log`,
 `/tmp/gusto-pickup-cancel-build.log`, `/tmp/gusto-pickup-cancel-cloud.log`,
 `/tmp/gusto-pickup-cancel-install.log`, `/tmp/gusto-pickup-cancel-launch.log`.
+
+## Gusto naming migration: October 5, 2026
+
+The renamed GustoCore package passes 53 tests, with one opt-in live-backend test
+skipped and no failures. GustoTests and the focused GustoUITests discovery test
+pass in the iPhone 17 Pro Simulator. The unsigned iPhone Release build passes
+using Gusto.xcodeproj and the Gusto scheme. These checks validate renamed imports,
+app/test target dependencies, resource paths, and app launch; they do not install
+a signed build on physical hardware.
+
+GustoDatabase typechecking, authentication checks, and the full backend integration
+suite pass against a separate local server on port 3098. The suite creates a
+`gusto-test-*` database and preserves it through republishing. Existing local and
+cloud application databases were not changed. Project regeneration is repeatable
+and retains the existing shared scheme settings.
+
+Logs: `/tmp/gusto-rename-core.log`, `/tmp/gusto-rename-device.log`,
+`/tmp/gusto-rename-simulator.log`, `/tmp/gusto-rename-simulator-final.log`,
+and `/tmp/gusto-rename-database-integration.log`.

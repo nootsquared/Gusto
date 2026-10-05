@@ -2,7 +2,7 @@
 
 The app calls the authenticated SpacetimeDB `scan_analyze` procedure. Only that server calls
 Gemini. The API key lives in the private `gemini_configuration` table and an ignored, permission
-restricted local `MHacksDB/.gemini-key` file; it is never compiled into the app or returned to users.
+restricted local `GustoDatabase/.gemini-key` file; it is never compiled into the app or returned to users.
 The supplied replacement key has been verified against a real photo on the isolated local server.
 The default is `gemini-3.1-flash-lite`, which successfully identified ripe bananas and their bounds.
 The model can be changed with `GEMINI_MODEL` when configuring the server.
@@ -13,9 +13,9 @@ The shared backend was deployed on October 4, 2026, with Gemini configured and e
 reindexed. Future deployments use:
 
 ```sh
-cd /Users/pranavmaringanti/Dev/MHacks/MHacksDB
+cd /Users/pranavmaringanti/Dev/MHacks/GustoDatabase
 npm run publish:cloud -- --yes=remote,migrate,break-clients
-RESCUE_SERVER=https://maincloud.spacetimedb.com RESCUE_DATABASE=mhacks-pranav-dev-975fp node scripts/configure-gemini.mjs
+GUSTO_SERVER=https://maincloud.spacetimedb.com GUSTO_DATABASE=mhacks-pranav-dev-975fp node scripts/configure-gemini.mjs
 spacetime call mhacks-pranav-dev-975fp rebuild_search_index --server https://maincloud.spacetimedb.com --no-config --yes
 ```
 
@@ -65,7 +65,7 @@ history; the app does not pretend they are current conditions.
 
 ## Another phone
 
-Connect the second phone to Xcode, enable Developer Mode and install the same updated Rescue/Gusto
+Connect the second phone to Xcode, enable Developer Mode and install the same updated Gusto/Gusto
 scheme with your signing team. Use a normal launch with no `--fixture`, `--uitesting` or
 `--local-backend` arguments. Sign into Google separately on each phone. Both normal builds use
 `https://maincloud.spacetimedb.com`, database `mhacks-pranav-dev-975fp`.

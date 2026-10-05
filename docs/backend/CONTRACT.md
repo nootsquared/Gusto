@@ -77,7 +77,7 @@ erDiagram
   users ||--o{ impact_monthly : derives
 ```
 
-All tables are in `MHacksDB/spacetimedb/src/schema.ts`. IDs are stable strings allocated by a persistent transactional sequence (deterministic strings for seed data). Money and weights are integer cents/grams;
+All tables are in `GustoDatabase/spacetimedb/src/schema.ts`. IDs are stable strings allocated by a persistent transactional sequence (deterministic strings for seed data). Money and weights are integer cents/grams;
 stored UTC times are u64 milliseconds. JSON converts safe-range times into numeric values.
 Coordinates are deliberately coarse public doubles and private exact doubles. Primary keys,
 unique claims/payment-per-stop/payment-per-receipt constraints, and transactional relationship
@@ -143,7 +143,7 @@ stops and removes confirmation when a window no longer fits; extending a window 
 `register_profile` takes one positional string argument, the SpacetimeAuth ID token,
 and the same token in the HTTP Authorization bearer header. The procedure verifies
 the token/caller pair through the fixed Maincloud identity verification endpoint outside
-the transaction, then requires the Rescue issuer, project, audience and unexpired token.
+the transaction, then requires the Gusto issuer, project, audience and unexpired token.
 The token is never logged or stored in product tables. New registrations atomically create
 `users`, `user_identities`, `user_preferences`, `carts`, `seller_stats` and
 `notification_preferences`. Repeated calls return the existing active user ID. Disabled

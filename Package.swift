@@ -2,13 +2,13 @@
 import PackageDescription
 
 let package = Package(
-    name: "RescueCore",
+    name: "GustoCore",
     platforms: [.macOS(.v14), .iOS(.v17)],
-    products: [.library(name: "RescueCore", targets: ["RescueCore"])],
+    products: [.library(name: "GustoCore", targets: ["GustoCore"])],
     targets: [
-        .target(name: "RescueCore"),
+        .target(name: "GustoCore"),
         .testTarget(
-            name: "RescueCoreTests", dependencies: ["RescueCore"], path: "Tests/RescueCoreTests"),
+            name: "GustoCoreTests", dependencies: ["GustoCore"], path: "Tests/GustoCoreTests"),
     ],
     swiftLanguageModes: [.v5]
 )

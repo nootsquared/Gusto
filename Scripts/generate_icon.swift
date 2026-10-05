@@ -30,7 +30,7 @@ NSColor(red: 47 / 255, green: 74 / 255, blue: 58 / 255, alpha: 1).setStroke()
 stem.stroke()
 NSGraphicsContext.restoreGraphicsState()
 let directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-    .appendingPathComponent("Rescue/Resources/Assets.xcassets/AppIcon.appiconset")
+    .appendingPathComponent("Gusto/Resources/Assets.xcassets/AppIcon.appiconset")
 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 try bitmap.representation(using: .png, properties: [:])!.write(
     to: directory.appendingPathComponent("AppIcon.png"))
